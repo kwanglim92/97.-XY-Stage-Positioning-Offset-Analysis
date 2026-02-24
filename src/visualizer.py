@@ -6,12 +6,25 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+import io
 
 
 # Recipe별 색상 팔레트
 RECIPE_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#E91E63',
                  '#9C27B0', '#00BCD4', '#795548', '#607D8B']
 
+
+def _fig_to_png(fig: Figure) -> bytes:
+    """Figure → PNG bytes 변환 유틸. app.py(JSON-RPC)에서 사용.
+
+    GUI에서는 FigureCanvasQTAgg(fig)를 직접 사용하므로 이 함수를 호출하지 않습니다.
+    이 함수는 Figure를 close합니다.
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
 
 def plot_trend_chart(trend_data: list, title: str = 'Lot Trend',
                      y_label: str = 'HZ1_O (nm)',
