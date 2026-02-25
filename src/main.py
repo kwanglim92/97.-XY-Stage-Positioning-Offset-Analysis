@@ -42,6 +42,7 @@ from exporter import export_combined_csv, export_excel_report
 from settings import load_settings, save_settings, add_recent_folder
 from recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
 import visualizer as viz
+import visualizer_pg as viz_pg
 
 
 # ═══════════════════════════════════════════════
@@ -198,7 +199,7 @@ class CopyableTable(QTableWidget):
 
 
 # ═══════════════════════════════════════════════
-#  ChartWidget — FigureCanvas + Toolbar
+#  ChartWidget — FigureCanvas + Toolbar (Matplotlib)
 # ═══════════════════════════════════════════════
 class ChartWidget(QWidget):
     """Matplotlib Figure를 인터랙티브 차트로 표시 (줌/패닝/저장)."""
@@ -229,6 +230,37 @@ class ChartWidget(QWidget):
             self._canvas.deleteLater()
             self._canvas = None
             self._toolbar = None
+
+
+# ═══════════════════════════════════════════════
+#  InteractiveChartWidget — pyqtgraph 위젯 컨테이너
+# ═══════════════════════════════════════════════
+class InteractiveChartWidget(QWidget):
+    """pyqtgraph 위젯을 감싸는 컨테이너. ChartWidget과 동일한 패턴."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._widget = None
+
+    def set_widget(self, widget):
+        """pyqtgraph 위젯을 설정 (기존 위젯 교체)."""
+        if self._widget:
+            self._layout.removeWidget(self._widget)
+            self._widget.deleteLater()
+        self._widget = widget
+        self._layout.addWidget(widget)
+
+    def get_widget(self):
+        """현재 설정된 pyqtgraph 위젯 반환."""
+        return self._widget
+
+    def clear(self):
+        if self._widget:
+            self._layout.removeWidget(self._widget)
+            self._widget.deleteLater()
+            self._widget = None
 
 
 # ═══════════════════════════════════════════════
@@ -535,11 +567,26 @@ class DataAnalyzerApp(QMainWindow):
         right_layout.addWidget(self.chart_tabs)
 
         self.chart_widgets = {}
-        for name in ['Contour X', 'Contour Y', 'X*Y Offset', 'XY Scatter',
-                      '↗️ Vector Map', 'Die Position', '트렌드', '분포', 'TIFF']:
+        # Matplotlib 유지 탭 (Contour/Vector/Die — scipy 보간 필수)
+        for name in ['Contour X', 'Contour Y', 'X*Y Offset',
+                      '↗️ Vector Map', 'Die Position']:
             cw = ChartWidget()
             self.chart_tabs.addTab(cw, name)
             self.chart_widgets[name] = cw
+
+        # pyqtgraph 전환 탭 (인터랙티브 — GPU 가속)
+        for name in ['📈 트렌드', '🎯 XY Scatter', '📊 분포']:
+            cw = InteractiveChartWidget()
+            self.chart_tabs.addTab(cw, name)
+            self.chart_widgets[name] = cw
+
+        # TIFF — pyqtgraph ImageView 기반
+        tiff_cw = InteractiveChartWidget()
+        tiff_viewer = viz_pg.create_tiff_widget()
+        tiff_cw.set_widget(tiff_viewer)
+        self.chart_tabs.addTab(tiff_cw, '🔬 TIFF')
+        self.chart_widgets['TIFF'] = tiff_cw
+        self._tiff_viewer = tiff_viewer
 
         # Contour X/Y — add Repeat별 Contour button in toolbar area
         for axis_name in ('Contour X', 'Contour Y'):
@@ -1026,41 +1073,63 @@ class DataAnalyzerApp(QMainWindow):
                 t.setItem(row, col, item)
 
     # ──────────────────────────────────────────────
-    # Charts (FigureCanvasQTAgg)
+    # Charts — Hybrid: matplotlib + pyqtgraph
     # ──────────────────────────────────────────────
     def _update_charts(self, data, trend, recipe):
         import matplotlib.pyplot as plt
         plt.close('all')
         short = recipe.get('short_name', '')
 
-        self.chart_widgets['트렌드'].set_figure(
-            viz.plot_trend_chart(trend, title=f'{short} Lot Trend'))
-        self.chart_widgets['분포'].set_figure(
-            viz.plot_boxplot(data, title=f'{short} Boxplot'))
+        # ─── pyqtgraph 인터랙티브 차트 (GPU 가속) ───
+        try:
+            self.chart_widgets['📈 트렌드'].set_widget(
+                viz_pg.create_trend_widget(trend, title=f'{short} Lot Trend'))
+        except Exception as e:
+            self.logger.error(f"트렌드 차트 오류: {e}")
 
-        if self._dev_x.get('die_stats'):
-            self.chart_widgets['Contour X'].set_figure(
-                viz.plot_wafer_contour(self._dev_x['die_stats'],
-                                       title=f'{short} — X Wafer Contour'))
-        if self._dev_y.get('die_stats'):
-            self.chart_widgets['Contour Y'].set_figure(
-                viz.plot_wafer_contour(self._dev_y['die_stats'],
-                                       title=f'{short} — Y Wafer Contour'))
+        try:
+            self.chart_widgets['📊 분포'].set_widget(
+                viz_pg.create_histogram_widget(data, title=f'{short} Distribution'))
+        except Exception as e:
+            self.logger.error(f"분포 차트 오류: {e}")
 
-        xy_prod = compute_xy_product(
-            self._dev_x.get('die_stats', []), self._dev_y.get('die_stats', []))
-        if xy_prod:
-            prod_stats = [{'die': d, 'avg': v} for d, v in xy_prod.items()]
-            self.chart_widgets['X*Y Offset'].set_figure(
-                viz.plot_wafer_contour(prod_stats, title=f'{short} — X*Y Offset'))
+        try:
+            self.chart_widgets['🎯 XY Scatter'].set_widget(
+                viz_pg.create_scatter_widget(
+                    self._dev_x, self._dev_y, title=f'{short} — XY Scatter'))
+        except Exception as e:
+            self.logger.error(f"XY Scatter 차트 오류: {e}")
 
-        self.chart_widgets['XY Scatter'].set_figure(
-            viz.plot_xy_scatter(self._dev_x, self._dev_y, title=f'{short} — XY Scatter'))
+        # ─── matplotlib 차트 (Contour/Vector — scipy 보간) ───
+        try:
+            if self._dev_x.get('die_stats'):
+                self.chart_widgets['Contour X'].set_figure(
+                    viz.plot_wafer_contour(self._dev_x['die_stats'],
+                                           title=f'{short} — X Wafer Contour'))
+            if self._dev_y.get('die_stats'):
+                self.chart_widgets['Contour Y'].set_figure(
+                    viz.plot_wafer_contour(self._dev_y['die_stats'],
+                                           title=f'{short} — Y Wafer Contour'))
+        except Exception as e:
+            self.logger.error(f"Contour 차트 오류: {e}")
 
-        if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
-            self.chart_widgets['↗️ Vector Map'].set_figure(
-                viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
-                                    title=f'{short} — Vector Map'))
+        try:
+            xy_prod = compute_xy_product(
+                self._dev_x.get('die_stats', []), self._dev_y.get('die_stats', []))
+            if xy_prod:
+                prod_stats = [{'die': d, 'avg': v} for d, v in xy_prod.items()]
+                self.chart_widgets['X*Y Offset'].set_figure(
+                    viz.plot_wafer_contour(prod_stats, title=f'{short} — X*Y Offset'))
+        except Exception as e:
+            self.logger.error(f"X*Y Offset 차트 오류: {e}")
+
+        try:
+            if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
+                self.chart_widgets['↗️ Vector Map'].set_figure(
+                    viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
+                                        title=f'{short} — Vector Map'))
+        except Exception as e:
+            self.logger.error(f"Vector Map 차트 오류: {e}")
 
     def _render_die_position(self):
         self.chart_widgets['Die Position'].set_figure(viz.plot_die_position_map())
@@ -1234,7 +1303,6 @@ class DataAnalyzerApp(QMainWindow):
 
         try:
             from tiff_loader import load_tiff
-            from matplotlib.figure import Figure
 
             results = []
             for tp in tiff_paths:
@@ -1247,45 +1315,10 @@ class DataAnalyzerApp(QMainWindow):
                 self.statusBar().showMessage("⚠ TIFF 로드 실패")
                 return
 
-            n = len(results)
-            fig = Figure(figsize=(14, 5 * max(1, (n + 1) // 2)), dpi=100)
-            fig.patch.set_facecolor('#1e1e2e')
-            rr = max(1, (n + 1) // 2)
-            cc = min(n, 2)
-            for i, tr in enumerate(results):
-                ax = fig.add_subplot(rr, cc, i + 1)
-                ax.set_facecolor('#282a3a')
-                data2d = tr.get('data_2d')
-                if data2d is None:
-                    ax.text(0.5, 0.5, 'No data', ha='center', va='center',
-                            transform=ax.transAxes, color='#cdd6f4')
-                    continue
-                profile = data2d.flatten()
-                info = tr.get('info', {})
-                scan_size = info.get('scan_size_width') or info.get('scan_size_height') or 0
-                if scan_size and scan_size > 0:
-                    x_axis = [scan_size * j / len(profile) for j in range(len(profile))]
-                    ax.set_xlabel('Position (μm)', color='#a6adc8')
-                else:
-                    x_axis = list(range(len(profile)))
-                    ax.set_xlabel('Pixel', color='#a6adc8')
-                ax.plot(x_axis, profile, color='#89b4fa', linewidth=0.6)
-                ax.set_ylabel(f'Z ({info.get("z_unit", "")})', color='#a6adc8')
-                ax.tick_params(colors='#a6adc8')
-                for spine in ax.spines.values():
-                    spine.set_edgecolor('#45475a')
-                ax.set_title(
-                    f'{tr["filename"]}\n'
-                    f'{info.get("channel_name","")} [{info.get("head_mode","")}]',
-                    fontsize=8, color='#cdd6f4'
-                )
-                ax.grid(True, alpha=0.2, color='#45475a')
-            fig.suptitle(f'{lot_name} / {site_id} — TIFF Profile',
-                         fontsize=11, fontweight='bold', color='#cdd6f4')
-            fig.tight_layout()
-
-            self._show_tiff(fig)
-            self.statusBar().showMessage(f"✅ TIFF {n}개 로드 완료: {lot_name}/{site_id}")
+            # 모든 TIFF를 서브탭으로 표시
+            self._tiff_viewer.set_results(results)
+            self._show_tiff()
+            self.statusBar().showMessage(f"✅ TIFF {len(results)}개 로드 완료: {lot_name}/{site_id}")
 
         except Exception as e:
             import traceback
@@ -1294,8 +1327,8 @@ class DataAnalyzerApp(QMainWindow):
             self.statusBar().showMessage(f"⚠ TIFF 오류: {e}")
 
 
-    def _show_tiff(self, fig):
-        self.chart_widgets['TIFF'].set_figure(fig)
+    def _show_tiff(self):
+        """TIFF 탭으로 전환."""
         self.chart_tabs.setCurrentWidget(self.chart_widgets['TIFF'])
 
     def _open_tiff_folder(self):

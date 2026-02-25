@@ -7,7 +7,7 @@
   "outlier_method": "iqr",
   "outlier_threshold": 1.5,
   "export_delimiter": "\t",
-  "window_geometry": "1920x1009+0+23",
+  "window_geometry": "1600x950+8+31",
   "recent_folders": [
     "C:/Users/Spare/Desktop/03. Program/97. XY Stage Positioning Offset Analysis/data",
     "C:/Users/Spare/Desktop/03. Program/97. XY Stage Positioning Offset Analysis/data/3. LLC Translation/2nd",
