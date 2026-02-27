@@ -17,10 +17,10 @@ from functools import partial
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
-    QPushButton, QLabel, QLineEdit, QFrame, QTextEdit,
-    QFileDialog, QMessageBox, QDialog, QHeaderView,
-    QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea,
+    QSplitter, QPushButton, QLabel, QLineEdit, QTabWidget,
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
+    QMessageBox, QFrame, QDialog,
+    QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
@@ -384,8 +384,8 @@ class DataAnalyzerApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("📊 XY Stage Offset Analyzer — Workflow")
-        self.setMinimumSize(1280, 800)
-        self.resize(1600, 950)
+        self.setMinimumSize(1280, 860)
+        self.resize(1600, 1050)
 
         # State
         self.settings = load_settings()
@@ -403,6 +403,7 @@ class DataAnalyzerApp(QMainWindow):
 
         self._build_ui()
         self._restore_settings()
+        self.showMaximized()  # 1920×1080 최대화 상태로 시작
 
     # ──────────────────────────────────────────────
     # Build UI
@@ -411,14 +412,15 @@ class DataAnalyzerApp(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(10, 8, 10, 4)
-        root_layout.setSpacing(4)
+        root_layout.setContentsMargins(8, 4, 8, 2)
+        root_layout.setSpacing(2)
 
         # ===== TOP BAR =====
         top = QHBoxLayout()
         top.addWidget(QLabel("📁"))
         self.path_edit = QLineEdit(self.folder_path)
-        self.path_edit.setMinimumWidth(400)
+        self.path_edit.setMinimumWidth(250)
+        self.path_edit.setMaximumWidth(450)
         top.addWidget(self.path_edit)
 
         btn_browse = QPushButton("찾아보기")
@@ -431,17 +433,6 @@ class DataAnalyzerApp(QMainWindow):
         top.addWidget(btn_scan)
 
         top.addStretch()
-
-        btn_excel = QPushButton("📊 Excel")
-        btn_excel.clicked.connect(self._export_excel)
-        top.addWidget(btn_excel)
-        btn_csv = QPushButton("💾 CSV")
-        btn_csv.clicked.connect(self._export_csv)
-        top.addWidget(btn_csv)
-        btn_pdf = QPushButton("📄 PDF")
-        btn_pdf.setProperty("accent", True)
-        btn_pdf.clicked.connect(self._export_pdf)
-        top.addWidget(btn_pdf)
 
         root_layout.addLayout(top)
 
@@ -501,7 +492,13 @@ class DataAnalyzerApp(QMainWindow):
         cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과']
         self.sum_table.setColumnCount(len(cols_s))
         self.sum_table.setHorizontalHeaderLabels(cols_s)
-        self.sum_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        hdr = self.sum_table.horizontalHeader()
+        # 좁은 컬럼: R(1), Out(8), X(9), Y(10), 결과(11)
+        for col in range(len(cols_s)):
+            hdr.setSectionResizeMode(col, QHeaderView.Stretch)
+        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45)]:
+            hdr.setSectionResizeMode(col, QHeaderView.Fixed)
+            self.sum_table.setColumnWidth(col, width)
         self.data_tabs.addTab(self.sum_table, "📊 Summary")
 
         # Sub 2: Die 평균 (X/Y sub-tabs)
@@ -550,43 +547,115 @@ class DataAnalyzerApp(QMainWindow):
         cols_r = ['Lot', 'Site', 'Axis', 'HZ1_O', 'V', 'Out']
         self.raw_table.setColumnCount(len(cols_r))
         self.raw_table.setHorizontalHeaderLabels(cols_r)
-        self.raw_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        raw_hdr = self.raw_table.horizontalHeader()
+        for col in range(len(cols_r)):
+            raw_hdr.setSectionResizeMode(col, QHeaderView.Stretch)
+        for col, width in [(4, 30), (5, 30)]:
+            raw_hdr.setSectionResizeMode(col, QHeaderView.Fixed)
+            self.raw_table.setColumnWidth(col, width)
         self.raw_table.cellDoubleClicked.connect(self._on_row_double_click)
         raw_layout.addWidget(self.raw_table, 1)
         self.data_tabs.addTab(raw_widget, "📄 원본 데이터")
 
         splitter.addWidget(left)
 
-        # ════════════ RIGHT PANEL ════════════
+        # ════════════ RIGHT PANEL (2-Tier Grouped Tabs) ════════════
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(4, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        self.chart_tabs = QTabWidget()
-        right_layout.addWidget(self.chart_tabs)
+        # ─── Outer Category Tabs ───
+        self.chart_category_tabs = QTabWidget()
+        right_layout.addWidget(self.chart_category_tabs)
 
         self.chart_widgets = {}
-        # Matplotlib 유지 탭 (Contour/Vector/Die — scipy 보간 필수)
+        self._inner_tabs = {}  # category_name → inner QTabWidget
+
+        def _add_chart(category, name, widget):
+            if category not in self._inner_tabs:
+                inner = QTabWidget()
+                inner.setDocumentMode(True)
+                self._inner_tabs[category] = inner
+                self.chart_category_tabs.addTab(inner, category)
+            self._inner_tabs[category].addTab(widget, name)
+            self.chart_widgets[name] = widget
+
+        # 기본 분석 (matplotlib)
         for name in ['Contour X', 'Contour Y', 'X*Y Offset',
                       '↗️ Vector Map', 'Die Position']:
-            cw = ChartWidget()
-            self.chart_tabs.addTab(cw, name)
-            self.chart_widgets[name] = cw
+            _add_chart('기본 분석', name, ChartWidget())
 
-        # pyqtgraph 전환 탭 (인터랙티브 — GPU 가속)
+        # 인터랙티브 (pyqtgraph)
         for name in ['📈 트렌드', '🎯 XY Scatter', '📊 분포']:
-            cw = InteractiveChartWidget()
-            self.chart_tabs.addTab(cw, name)
-            self.chart_widgets[name] = cw
+            _add_chart('인터랙티브', name, InteractiveChartWidget())
 
-        # TIFF — pyqtgraph ImageView 기반
+        # TIFF
         tiff_cw = InteractiveChartWidget()
         tiff_viewer = viz_pg.create_tiff_widget()
         tiff_cw.set_widget(tiff_viewer)
-        self.chart_tabs.addTab(tiff_cw, '🔬 TIFF')
-        self.chart_widgets['TIFF'] = tiff_cw
+        _add_chart('인터랙티브', '🔬 TIFF', tiff_cw)
         self._tiff_viewer = tiff_viewer
+
+        # 고급 분석 (pyqtgraph — Phase 2)
+        for name in ['🔍 Pareto', '🔗 Correlation']:
+            _add_chart('고급 분석', name, InteractiveChartWidget())
+        _add_chart('고급 분석', '🌐 3D Surface', InteractiveChartWidget())
+
+        # 비교 (matplotlib — Recipe Comparison)
+        _add_chart('비교', '📊 Recipe 비교', ChartWidget())
+
+        # 📤 Export 탭
+        export_widget = QWidget()
+        export_layout = QVBoxLayout(export_widget)
+        export_layout.setContentsMargins(40, 40, 40, 40)
+        export_layout.setSpacing(16)
+
+        export_header = QLabel("📤 데이터 내보내기")
+        export_header.setStyleSheet(f"color:{ACCENT}; font-size:16pt; font-weight:bold;")
+        export_header.setAlignment(Qt.AlignCenter)
+        export_layout.addWidget(export_header)
+
+        export_desc = QLabel("분석 결과를 다양한 형식으로 내보낼 수 있습니다.")
+        export_desc.setStyleSheet(f"color:{FG2}; font-size:10pt;")
+        export_desc.setAlignment(Qt.AlignCenter)
+        export_layout.addWidget(export_desc)
+
+        export_layout.addSpacing(10)
+
+        export_buttons_data = [
+            ('📊 Excel 내보내기', 'Die별 편차, Summary, Raw Data 등\n전체 데이터를 Excel 파일로 저장', self._export_excel, ACCENT),
+            ('💾 CSV 내보내기', 'Raw Data를 CSV 형식으로 저장\n타 프로그램에서 불러오기 용이', self._export_csv, GREEN),
+            ('📄 PDF 보고서', '차트 + 통계 포함 PDF 보고서 생성\n출력 및 공유용', self._export_pdf, RED),
+        ]
+        for text, desc, slot, color in export_buttons_data:
+            btn = QPushButton(f"{text}")
+            btn.setMinimumHeight(60)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {BG3}; color: {FG};
+                    border: 1px solid {color}40; border-left: 4px solid {color};
+                    border-radius: 6px; font-size: 12pt; font-weight: bold;
+                    text-align: left; padding: 12px 20px;
+                }}
+                QPushButton:hover {{ background: #45475a; border-color: {color}; }}
+            """)
+            btn.setToolTip(desc)
+            btn.clicked.connect(slot)
+            export_layout.addWidget(btn)
+
+            desc_label = QLabel(f"    {desc.split(chr(10))[0]}")
+            desc_label.setStyleSheet(f"color:{FG2}; font-size:8pt; margin-bottom:4px;")
+            export_layout.addWidget(desc_label)
+
+        export_layout.addStretch()
+
+        # Export 카테고리로 등록 (단일 페이지 — 내부 탭 없음)
+        inner_export = QTabWidget()
+        inner_export.setDocumentMode(True)
+        inner_export.addTab(export_widget, '내보내기')
+        self._inner_tabs['📤 Export'] = inner_export
+        self.chart_category_tabs.addTab(inner_export, '📤 Export')
 
         # Contour X/Y — add Repeat별 Contour button in toolbar area
         for axis_name in ('Contour X', 'Contour Y'):
@@ -595,11 +664,19 @@ class DataAnalyzerApp(QMainWindow):
             btn = QPushButton(f"🗺️ Repeat별 Contour ({axis})")
             btn.clicked.connect(partial(self._open_repeat_contour, axis))
             cw.layout().insertWidget(0, btn)
-        # TIFF tab — no extra bar needed (button moved to Raw Data tab)
 
         splitter.addWidget(right)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 5)
+
+        # ─── 좌측 패널 토글 (F11 + 스플리터 더블클릭) ───
+        self._main_splitter = splitter
+        self._left_panel = left
+        self._saved_splitter_sizes = None
+
+        shortcut = QShortcut(QKeySequence('F11'), self)
+        shortcut.activated.connect(self._toggle_left_panel)
+        splitter.handle(1).installEventFilter(self)
 
         # Render die position immediately
         QTimer.singleShot(200, self._render_die_position)
@@ -611,6 +688,41 @@ class DataAnalyzerApp(QMainWindow):
 
         # Status bar
         self.statusBar().showMessage("폴더를 선택하세요.")
+
+    # ──────────────────────────────────────────────
+    # Chart Navigation
+    # ──────────────────────────────────────────────
+    def _select_chart(self, name: str):
+        """프로그래밍 방식으로 차트 선택 (카테고리 + 내부 탭 자동 전환)."""
+        for cat_name, inner_tab in self._inner_tabs.items():
+            for i in range(inner_tab.count()):
+                if inner_tab.tabText(i) == name:
+                    self.chart_category_tabs.setCurrentWidget(inner_tab)
+                    inner_tab.setCurrentIndex(i)
+                    return
+
+    def _toggle_left_panel(self):
+        """좌측 패널 접기/펼치기 (F11)."""
+        sizes = self._main_splitter.sizes()
+        if sizes[0] > 0:
+            self._saved_splitter_sizes = sizes
+            self._main_splitter.setSizes([0, sum(sizes)])
+        else:
+            if self._saved_splitter_sizes:
+                self._main_splitter.setSizes(self._saved_splitter_sizes)
+            else:
+                total = sum(sizes)
+                self._main_splitter.setSizes([total * 4 // 9, total * 5 // 9])
+
+    def eventFilter(self, obj, event):
+        """스플리터 핸들 더블클릭 → 좌측 패널 토글."""
+        from PySide6.QtCore import QEvent
+        if (hasattr(self, '_main_splitter')
+                and obj is self._main_splitter.handle(1)
+                and event.type() == QEvent.MouseButtonDblClick):
+            self._toggle_left_panel()
+            return True
+        return super().eventFilter(obj, event)
 
     # ──────────────────────────────────────────────
     # Lifecycle
@@ -658,6 +770,32 @@ class DataAnalyzerApp(QMainWindow):
             self.logger.warn("Recipe 구조를 찾지 못했습니다.")
             QMessageBox.information(self, "알림", "Recipe 구조를 찾지 못했습니다.")
             return
+
+        # ─── 표준 Recipe 이름 검증 ───
+        std_names = self.settings.get('standard_recipe_names', [])
+        if std_names:
+            detected = [r['short_name'] for r in self.recipes]
+            mismatched = []
+            for d in detected:
+                if not any(std.lower() in d.lower() or d.lower() in std.lower()
+                           for std in std_names):
+                    mismatched.append(d)
+
+            if mismatched:
+                std_list = '\n'.join(f"  • {s}" for s in std_names)
+                det_list = '\n'.join(f"  • {d}" for d in detected)
+                mis_list = '\n'.join(f"  ⚠ {m}" for m in mismatched)
+                reply = QMessageBox.warning(
+                    self, "⚠ Recipe 이름 불일치",
+                    f"표준 Recipe 이름과 일치하지 않는 항목이 있습니다.\n\n"
+                    f"【표준 이름】\n{std_list}\n\n"
+                    f"【감지된 이름】\n{det_list}\n\n"
+                    f"【불일치 항목】\n{mis_list}\n\n"
+                    f"계속 진행하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if reply == QMessageBox.No:
+                    self.logger.warn("사용자가 스캔을 취소했습니다 (Recipe 이름 불일치).")
+                    return
 
         self.logger.ok(f"✅ {len(self.recipes)}개 Recipe 발견")
         for r in self.recipes:
@@ -939,29 +1077,29 @@ class DataAnalyzerApp(QMainWindow):
                     if sy['count'] > 0:
                         py = dy['overall_range'] <= spec_r and dy['overall_stddev'] <= spec_s
 
-            # Pass/Fail 셀 (X, Y)
+            # Pass/Fail 셀 (X, Y) — 기호만 표시
             for col_offset, flag in enumerate([px, py]):
                 if flag is None:
                     item = QTableWidgetItem('—')
                     item.setBackground(QColor(BG3))
                 elif flag:
-                    item = QTableWidgetItem('✅ P')
+                    item = QTableWidgetItem('✅')
                     item.setBackground(QColor(GREEN))
                     item.setForeground(QColor(BG))
                 else:
-                    item = QTableWidgetItem('❌ F')
+                    item = QTableWidgetItem('❌')
                     item.setBackground(QColor(RED))
                     item.setForeground(QColor(BG))
                 item.setTextAlignment(Qt.AlignCenter)
                 t.setItem(row, 9 + col_offset, item)
 
-            # 종합 결과
+            # 종합 결과 — 텍스트만 (배경색으로 구분)
             if px is None or py is None:
                 overall_text, overall_bg, overall_fg = '—', QColor(BG3), QColor(FG2)
             elif px and py:
-                overall_text, overall_bg, overall_fg = '✅ PASS', QColor(GREEN), QColor(BG)
+                overall_text, overall_bg, overall_fg = 'PASS', QColor(GREEN), QColor(BG)
             else:
-                overall_text, overall_bg, overall_fg = '❌ FAIL', QColor(RED), QColor(BG)
+                overall_text, overall_bg, overall_fg = 'FAIL', QColor(RED), QColor(BG)
             item_o = QTableWidgetItem(overall_text)
             item_o.setBackground(overall_bg)
             item_o.setForeground(overall_fg)
@@ -1068,6 +1206,7 @@ class DataAnalyzerApp(QMainWindow):
                     '⚠️' if io else '']
             for col, v in enumerate(vals):
                 item = QTableWidgetItem(v)
+                item.setTextAlignment(Qt.AlignCenter)
                 if io:
                     item.setForeground(QColor(RED))
                 t.setItem(row, col, item)
@@ -1329,7 +1468,7 @@ class DataAnalyzerApp(QMainWindow):
 
     def _show_tiff(self):
         """TIFF 탭으로 전환."""
-        self.chart_tabs.setCurrentWidget(self.chart_widgets['TIFF'])
+        self._select_chart('🔬 TIFF')
 
     def _open_tiff_folder(self):
         folder = os.path.normpath(self.last_tiff_folder) if self.last_tiff_folder else ''

@@ -34,18 +34,40 @@ DEFAULT_SETTINGS = {
         'LLC Translation':    {'spec_range': 4.0, 'spec_stddev': 0.8},
         'Global Align':       {'spec_range': 7.5, 'spec_stddev': 2.2},
     },
+    'standard_recipe_names': [
+        'Vision Pattern',
+        'In-Die Align',
+        'LLC Translation',
+        'Global Align',
+    ],
 }
 
 
+# 매 실행 시 코드 기본값을 우선 사용하는 키 (코드 업데이트 시 자동 반영)
+_ALWAYS_DEFAULT_KEYS = {'standard_recipe_names'}
+
+# 매 실행 시 리셋되는 키 (세션 비유지)
+_RESET_ON_START_KEYS = {'last_folder'}
+
+
 def load_settings() -> dict:
-    """설정 파일 로드 (없으면 기본값 반환)"""
+    """설정 파일 로드 (3단계 병합)
+
+    1. DEFAULT_SETTINGS 기본값으로 시작
+    2. 저장된 settings.json에서 persistent 키만 병합
+    3. _ALWAYS_DEFAULT_KEYS → 코드 기본값 강제
+    4. _RESET_ON_START_KEYS → 기본값으로 리셋
+    """
     settings = DEFAULT_SETTINGS.copy()
 
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
-            settings.update(saved)
+            # persistent 키만 병합 (always-default, reset 키 제외)
+            for k, v in saved.items():
+                if k not in _ALWAYS_DEFAULT_KEYS and k not in _RESET_ON_START_KEYS:
+                    settings[k] = v
         except (json.JSONDecodeError, IOError):
             pass
 

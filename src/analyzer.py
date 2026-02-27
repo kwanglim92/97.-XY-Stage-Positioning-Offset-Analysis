@@ -558,3 +558,100 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
         'residual_y': round(res_rms_y, 4),
         'n_dies': n,
     }
+
+
+# ──────────────────────────────────────────────
+# Pareto & Correlation Analysis (Phase 2)
+# ──────────────────────────────────────────────
+
+def compute_pareto_data(data: list, group_by: str = 'die') -> list:
+    """Die별 또는 Lot별 이상치 빈도 파레토 분석.
+
+    Args:
+        data: raw_data 리스트 (is_outlier 필드 필요)
+        group_by: 'die' 또는 'lot'
+
+    Returns:
+        [{'label': 'Die5', 'count': 12, 'percent': 30.0, 'cumulative': 30.0}, ...]
+        (이상치 수 내림차순 정렬)
+    """
+    counts = {}
+    for r in data:
+        if not r.get('is_outlier', False):
+            continue
+        if group_by == 'die':
+            die_num = extract_die_number(r.get('site_id', ''))
+            key = f'Die{die_num}' if die_num is not None else 'Unknown'
+        else:
+            key = r.get('lot_name', 'Unknown')
+        counts[key] = counts.get(key, 0) + 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return []
+
+    # 내림차순 정렬
+    sorted_items = sorted(counts.items(), key=lambda x: -x[1])
+
+    result = []
+    cumulative = 0.0
+    for label, count in sorted_items:
+        pct = count / total * 100
+        cumulative += pct
+        result.append({
+            'label': label,
+            'count': count,
+            'percent': round(pct, 1),
+            'cumulative': round(cumulative, 1),
+        })
+
+    return result
+
+
+def compute_correlation(x_die_stats: list, y_die_stats: list) -> dict:
+    """X/Y Die별 평균 편차 간 피어슨 상관관계 분석.
+
+    Returns:
+        {
+            'pearson_r': float,     # 피어슨 상관계수
+            'r_squared': float,     # 결정계수
+            'slope': float,         # 회귀선 기울기
+            'intercept': float,     # 회귀선 절편
+            'points': [(x_avg, y_avg, die_label), ...],
+            'n': int,
+        }
+    """
+    x_map = {ds['die']: ds['avg'] for ds in x_die_stats}
+    y_map = {ds['die']: ds['avg'] for ds in y_die_stats}
+    common = sorted(set(x_map.keys()) & set(y_map.keys()))
+
+    if len(common) < 3:
+        return {'pearson_r': 0, 'r_squared': 0, 'slope': 0, 'intercept': 0,
+                'points': [], 'n': 0}
+
+    xs = [x_map[d] for d in common]
+    ys = [y_map[d] for d in common]
+    n = len(xs)
+
+    # Pearson r
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / n
+    sx = math.sqrt(sum((x - mx) ** 2 for x in xs) / n) if n > 1 else 1
+    sy = math.sqrt(sum((y - my) ** 2 for y in ys) / n) if n > 1 else 1
+    r = cov / (sx * sy) if sx > 0 and sy > 0 else 0
+
+    # Linear regression: y = slope * x + intercept
+    slope = cov / (sx ** 2) if sx > 0 else 0
+    intercept = my - slope * mx
+
+    points = [(x_map[d], y_map[d], d) for d in common]
+
+    return {
+        'pearson_r': round(r, 4),
+        'r_squared': round(r ** 2, 4),
+        'slope': round(slope, 4),
+        'intercept': round(intercept, 4),
+        'points': points,
+        'n': n,
+    }
