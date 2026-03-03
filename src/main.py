@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QPushButton, QLabel, QLineEdit, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-    QMessageBox, QFrame, QDialog,
+    QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox,
     QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
@@ -37,9 +37,12 @@ from analyzer import (
     detect_outliers, compute_repeatability, compute_cpk,
     filter_by_method, filter_valid_only, compute_deviation_matrix,
     compute_xy_product, compute_affine_transform, DIE_POSITIONS, get_die_position,
+    compute_pareto_data, compute_correlation, extract_die_positions,
+    filter_stabilization_die,
 )
 from exporter import export_combined_csv, export_excel_report
 from settings import load_settings, save_settings, add_recent_folder
+from sparkline_delegate import SparklineTrendDelegate
 from recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
 import visualizer as viz
 import visualizer_pg as viz_pg
@@ -199,6 +202,87 @@ class CopyableTable(QTableWidget):
 
 
 # ═══════════════════════════════════════════════
+#  FlowLayout — 가로 줄바꿈 레이아웃 (Die 체크박스용)
+# ═══════════════════════════════════════════════
+from PySide6.QtWidgets import QLayout, QWidgetItem
+from PySide6.QtCore import QRect, QSize
+
+class FlowLayout(QLayout):
+    """가로로 배치하다 넘치면 다음 줄로 넘기는 레이아웃."""
+
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        self.setContentsMargins(margin, margin, margin, margin)
+        if spacing >= 0:
+            self._spacing = spacing
+        else:
+            self._spacing = 4
+        self._items = []
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations()
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only=False):
+        m = self.contentsMargins()
+        effective = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y = effective.x(), effective.y()
+        line_height = 0
+        for item in self._items:
+            w = item.widget()
+            if w is None:
+                continue
+            space = self._spacing
+            next_x = x + w.sizeHint().width() + space
+            if next_x - space > effective.right() and line_height > 0:
+                x = effective.x()
+                y += line_height + space
+                next_x = x + w.sizeHint().width() + space
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(x, y, w.sizeHint().width(), w.sizeHint().height()))
+            x = next_x
+            line_height = max(line_height, w.sizeHint().height())
+        return y + line_height - rect.y() + m.bottom()
+
+
+# ═══════════════════════════════════════════════
 #  ChartWidget — FigureCanvas + Toolbar (Matplotlib)
 # ═══════════════════════════════════════════════
 class ChartWidget(QWidget):
@@ -213,10 +297,13 @@ class ChartWidget(QWidget):
 
     def set_figure(self, fig):
         if self._canvas:
+            old_fig = self._canvas.figure
             self._layout.removeWidget(self._toolbar)
             self._layout.removeWidget(self._canvas)
             self._toolbar.deleteLater()
             self._canvas.deleteLater()
+            import matplotlib.pyplot as _plt
+            _plt.close(old_fig)
         self._canvas = FigureCanvasQTAgg(fig)
         self._toolbar = NavigationToolbar2QT(self._canvas, self)
         self._layout.addWidget(self._toolbar)
@@ -432,6 +519,29 @@ class DataAnalyzerApp(QMainWindow):
         btn_scan.clicked.connect(self._scan_folder)
         top.addWidget(btn_scan)
 
+        # Wafer 크기 선택 (200mm / 300mm)
+        top.addSpacing(16)
+        wafer_label = QLabel("Wafer:")
+        wafer_label.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
+        top.addWidget(wafer_label)
+        self.wafer_combo = QComboBox()
+        self.wafer_combo.addItems(['200mm', '300mm'])
+        wafer_size = self.settings.get('wafer_size', 300)
+        self.wafer_combo.setCurrentIndex(0 if wafer_size == 200 else 1)
+        self.wafer_combo.setFixedWidth(80)
+        self.wafer_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {BG3}; color: {FG}; border: 1px solid #585b70;
+                border-radius: 4px; padding: 3px 8px; font-size: 9pt;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background: {BG2}; color: {FG}; selection-background-color: {ACCENT};
+            }}
+        """)
+        self.wafer_combo.currentIndexChanged.connect(self._on_wafer_size_changed)
+        top.addWidget(self.wafer_combo)
+
         top.addStretch()
 
         root_layout.addLayout(top)
@@ -485,20 +595,80 @@ class DataAnalyzerApp(QMainWindow):
         data_layout.setContentsMargins(0, 0, 0, 0)
         self.data_tabs = QTabWidget()
         data_layout.addWidget(self.data_tabs)
+
+        # ── Die 필터 패널 ──
+        die_filter_frame = QFrame()
+        die_filter_frame.setStyleSheet(f"""
+            QFrame {{ background: {BG2}; border: 1px solid {BG3};
+                     border-radius: 4px; margin: 2px 4px; }}
+        """)
+        die_filter_layout = QVBoxLayout(die_filter_frame)
+        die_filter_layout.setContentsMargins(8, 4, 8, 4)
+        die_filter_layout.setSpacing(4)
+
+        # 헤더 행: 타이틀 + 전체 선택 + 안정화 제외 + 정보
+        filter_header = QHBoxLayout()
+        filter_header.setSpacing(8)
+        lbl_filter = QLabel("🎯 Die 필터")
+        lbl_filter.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold; border: none;")
+        filter_header.addWidget(lbl_filter)
+
+        self.die_select_all_btn = QPushButton("✅ 전체 선택")
+        self.die_select_all_btn.setFixedHeight(22)
+        self.die_select_all_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {FG2}; border: none;
+                          border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
+            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+        """)
+        self.die_select_all_btn.clicked.connect(self._die_filter_select_all)
+        filter_header.addWidget(self.die_select_all_btn)
+
+        self.die_stab_btn = QPushButton("🚫 안정화 Die 제외")
+        self.die_stab_btn.setFixedHeight(22)
+        self.die_stab_btn.setToolTip(
+            "처음 측정된 Die를 자동으로 체크 해제합니다.\n"
+            "장비 안정화 목적으로 첫 Die를 이중 측정한 경우 사용하세요.")
+        self.die_stab_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: #f38ba8; border: none;
+                          border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
+            QPushButton:hover {{ background: #f38ba8; color: white; }}
+        """)
+        self.die_stab_btn.clicked.connect(self._die_filter_exclude_stabilization)
+        filter_header.addWidget(self.die_stab_btn)
+
+        self.filter_info_label = QLabel("")
+        self.filter_info_label.setStyleSheet("color: #f9e2af; font-size: 8pt; border: none;")
+        filter_header.addWidget(self.filter_info_label)
+        filter_header.addStretch()
+        die_filter_layout.addLayout(filter_header)
+
+        # Die 체크박스 컨테이너 (동적으로 채워짐)
+        self._die_cb_container = QWidget()
+        self._die_cb_container.setStyleSheet("border: none;")
+        self._die_cb_flow = FlowLayout(self._die_cb_container, margin=2, spacing=4)
+        die_filter_layout.addWidget(self._die_cb_container)
+
+        self._die_checkboxes = {}  # {die_num(0-based): QCheckBox}
+        self._die_filter_updating = False  # 재진입 방지 플래그
+
+        data_layout.addWidget(die_filter_frame)
         self.main_tabs.addTab(data_widget, "🗄️ 데이터 테이블")
 
         # Sub 1: Summary
         self.sum_table = CopyableTable()
-        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과']
+        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과', 'Trend']
         self.sum_table.setColumnCount(len(cols_s))
         self.sum_table.setHorizontalHeaderLabels(cols_s)
         hdr = self.sum_table.horizontalHeader()
-        # 좁은 컬럼: R(1), Out(8), X(9), Y(10), 결과(11)
+        # 좁은 컬럼: R(1), Out(8), X(9), Y(10), 결과(11), Trend(12)
         for col in range(len(cols_s)):
             hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45)]:
+        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45), (12, 80)]:
             hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.sum_table.setColumnWidth(col, width)
+        # Sparkline delegate 적용
+        self._sparkline_delegate = SparklineTrendDelegate(self.sum_table)
+        self.sum_table.setItemDelegateForColumn(12, self._sparkline_delegate)
         self.data_tabs.addTab(self.sum_table, "📊 Summary")
 
         # Sub 2: Die 평균 (X/Y sub-tabs)
@@ -572,19 +742,93 @@ class DataAnalyzerApp(QMainWindow):
         self.chart_widgets = {}
         self._inner_tabs = {}  # category_name → inner QTabWidget
 
-        def _add_chart(category, name, widget):
+        def _add_chart(category, name, widget, register=True):
             if category not in self._inner_tabs:
                 inner = QTabWidget()
                 inner.setDocumentMode(True)
                 self._inner_tabs[category] = inner
                 self.chart_category_tabs.addTab(inner, category)
             self._inner_tabs[category].addTab(widget, name)
-            self.chart_widgets[name] = widget
+            if register:
+                self.chart_widgets[name] = widget
 
-        # 기본 분석 (matplotlib)
-        for name in ['Contour X', 'Contour Y', 'X*Y Offset',
-                      '↗️ Vector Map', 'Die Position']:
+        for name in ['Contour X', 'Contour Y', 'X*Y Offset', 'Die Position']:
             _add_chart('기본 분석', name, ChartWidget())
+
+        # Vector Map (슬라이더 컨트롤 포함)
+        vm_container = QWidget()
+        vm_layout = QVBoxLayout(vm_container)
+        vm_layout.setContentsMargins(0, 0, 0, 0)
+        vm_layout.setSpacing(2)
+
+        # 슬라이더 바
+        slider_bar = QHBoxLayout()
+        slider_bar.setContentsMargins(8, 4, 8, 0)
+        lbl_icon = QLabel("📏")
+        lbl_icon.setStyleSheet(f"color: {FG2}; font-size: 10pt;")
+        slider_bar.addWidget(lbl_icon)
+        lbl_title = QLabel("화살표 배율:")
+        lbl_title.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
+        slider_bar.addWidget(lbl_title)
+
+        self.vector_scale_slider = QSlider(Qt.Horizontal)
+        self.vector_scale_slider.setRange(5, 50)  # 5% ~ 50%
+        self.vector_scale_slider.setValue(10)      # 기본 10%
+        self.vector_scale_slider.setTickPosition(QSlider.TicksBelow)
+        self.vector_scale_slider.setTickInterval(5)
+        self.vector_scale_slider.setFixedWidth(200)
+        self.vector_scale_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {BG3}; height: 6px; border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {ACCENT}; width: 14px; height: 14px;
+                margin: -4px 0; border-radius: 7px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ACCENT}; border-radius: 3px;
+            }}
+        """)
+        slider_bar.addWidget(self.vector_scale_slider)
+
+        self.vector_scale_label = QLabel("10%")
+        self.vector_scale_label.setFixedWidth(35)
+        self.vector_scale_label.setStyleSheet(f"color: {FG}; font-size: 9pt; font-weight: bold;")
+        slider_bar.addWidget(self.vector_scale_label)
+
+        _help_text = (
+            "화살표 배율 (기본 10%)\n\n"
+            "• 값이 클수록 화살표가 길어집니다\n"
+            "• 10% = 최대 편차 벡터가 웨이퍼 반경의 10% 길이\n"
+            "• 작은 편차가 잘 안 보이면 배율을 높이세요\n\n"
+            "예) 300mm 웨이퍼, 10% → 최대 화살표 ≈ 15,000µm\n"
+            "예) 300mm 웨이퍼, 30% → 최대 화살표 ≈ 45,000µm")
+        help_btn = QPushButton("?")
+        help_btn.setFixedSize(22, 22)
+        help_btn.setCursor(Qt.WhatsThisCursor)
+        help_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {FG2};
+                          border: 1px solid #585b70; border-radius: 11px;
+                          font-size: 10pt; font-weight: bold; }}
+            QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+        """)
+        help_btn.setToolTip(_help_text)
+        help_btn.clicked.connect(
+            lambda: QToolTip.showText(help_btn.mapToGlobal(
+                help_btn.rect().bottomLeft()), _help_text, help_btn, help_btn.rect(), 8000))
+        slider_bar.addWidget(help_btn)
+        slider_bar.addStretch()
+
+        vm_layout.addLayout(slider_bar)
+
+        # Chart area
+        self._vector_chart = ChartWidget()
+        vm_layout.addWidget(self._vector_chart, 1)
+        self.chart_widgets['↗️ Vector Map'] = self._vector_chart
+
+        self.vector_scale_slider.valueChanged.connect(self._on_vector_scale_changed)
+
+        _add_chart('기본 분석', '↗️ Vector Map', vm_container, register=False)
 
         # 인터랙티브 (pyqtgraph)
         for name in ['📈 트렌드', '🎯 XY Scatter', '📊 분포']:
@@ -602,8 +846,9 @@ class DataAnalyzerApp(QMainWindow):
             _add_chart('고급 분석', name, InteractiveChartWidget())
         _add_chart('고급 분석', '🌐 3D Surface', InteractiveChartWidget())
 
-        # 비교 (matplotlib — Recipe Comparison)
-        _add_chart('비교', '📊 Recipe 비교', ChartWidget())
+        # 비교 (matplotlib — Recipe Comparison: 3개 서브탭)
+        for name in ['📊 Boxplot', '📈 Trend', '🗺️ Heatmap']:
+            _add_chart('비교', name, ChartWidget())
 
         # 📤 Export 탭
         export_widget = QWidget()
@@ -657,13 +902,47 @@ class DataAnalyzerApp(QMainWindow):
         self._inner_tabs['📤 Export'] = inner_export
         self.chart_category_tabs.addTab(inner_export, '📤 Export')
 
-        # Contour X/Y — add Repeat별 Contour button in toolbar area
+        # Contour X/Y — add Repeat별 Contour button + 도움말 버튼
+        _contour_help = (
+            "Contour Map 색상 안내\n\n"
+            "색상은 편차의 ± 방향을 나타냅니다:\n"
+            "  🟢 초록 = 양(+) 방향 오프셋\n"
+            "  🟡 노랑 = 0 근처 (편차 없음)\n"
+            "  🔴 빨강 = 음(−) 방향 오프셋\n\n"
+            "• 색상 대비가 클수록 공간적 편향 존재\n"
+            "• 한쪽 빨강 ↔ 반대쪽 초록 = Stage Tilt\n"
+            "• 전체가 한 색으로 치우침 = Translation Offset\n\n"
+            "💡 Raw Deviation 테이블은 |절대값| 기준이므로\n"
+            "   색상이 다를 수 있습니다 (크기 vs 방향)")
         for axis_name in ('Contour X', 'Contour Y'):
             cw = self.chart_widgets[axis_name]
             axis = 'X' if 'X' in axis_name else 'Y'
+            toolbar_row = QHBoxLayout()
+            toolbar_row.setContentsMargins(0, 0, 0, 0)
             btn = QPushButton(f"🗺️ Repeat별 Contour ({axis})")
             btn.clicked.connect(partial(self._open_repeat_contour, axis))
-            cw.layout().insertWidget(0, btn)
+            toolbar_row.addWidget(btn)
+
+            help_btn = QPushButton("?")
+            help_btn.setFixedSize(22, 22)
+            help_btn.setCursor(Qt.WhatsThisCursor)
+            help_btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {FG2};
+                              border: 1px solid #585b70; border-radius: 11px;
+                              font-size: 10pt; font-weight: bold; }}
+                QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+            """)
+            help_btn.setToolTip(_contour_help)
+            help_btn.clicked.connect(
+                lambda checked=False, b=help_btn, t=_contour_help:
+                    QToolTip.showText(b.mapToGlobal(
+                        b.rect().bottomLeft()), t, b, b.rect(), 10000))
+            toolbar_row.addWidget(help_btn)
+            toolbar_row.addStretch()
+
+            toolbar_w = QWidget()
+            toolbar_w.setLayout(toolbar_row)
+            cw.layout().insertWidget(0, toolbar_w)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 5)
@@ -841,6 +1120,30 @@ class DataAnalyzerApp(QMainWindow):
         self.data_tabs.setCurrentIndex(0)
         if self.recipe_results:
             self._select_step(0)
+
+        # ─── Recipe 비교 차트 렌더링 ───
+        if len(self.recipe_results) >= 2:
+            try:
+                self.chart_widgets['📊 Boxplot'].set_figure(
+                    viz.plot_recipe_comparison_boxplot(self.recipe_results))
+                self.logger.ok("📊 Recipe Boxplot 비교 차트 생성 완료")
+            except Exception as e:
+                self.logger.error(f"Boxplot 비교 오류: {e}")
+
+            try:
+                self.chart_widgets['📈 Trend'].set_figure(
+                    viz.plot_recipe_comparison_trend(self.recipe_results))
+                self.logger.ok("📈 Recipe Trend 비교 차트 생성 완료")
+            except Exception as e:
+                self.logger.error(f"Trend 비교 오류: {e}")
+
+            try:
+                self.chart_widgets['🗺️ Heatmap'].set_figure(
+                    viz.plot_recipe_comparison_heatmap(self.recipe_results))
+                self.logger.ok("🗺️ Recipe Heatmap 비교 차트 생성 완료")
+            except Exception as e:
+                self.logger.error(f"Heatmap 비교 오류: {e}")
+
         self.statusBar().showMessage(
             f"✅ {len(self.recipes)}개 Recipe | {total}개 데이터 | Step 클릭 → 상세 분석")
 
@@ -930,6 +1233,8 @@ class DataAnalyzerApp(QMainWindow):
         if idx < len(self.recipe_results) and self.recipe_results[idx].get('raw_data'):
             result = self.recipe_results[idx]
             self.raw_data = result.get('raw_data', [])
+            # 실제 측정 데이터에서 Die 좌표 추출
+            self._dynamic_die_positions = extract_die_positions(self.raw_data)
             rd1 = next((rd for rd in recipe.get('rounds', []) if rd['name'] == '1st'), None)
             if rd1:
                 self.lot_list = scan_lot_folders(rd1['path'])
@@ -941,16 +1246,68 @@ class DataAnalyzerApp(QMainWindow):
     # Display Result
     # ──────────────────────────────────────────────
     def _display_result(self, result, recipe):
-        data = result.get('raw_data', [])
+        raw = result.get('raw_data', [])
+
+        # Die 체크박스 동적 생성 (첫 호출 or Step 전환 시)
+        from analyzer import extract_die_number
+        from visualizer import _color_from_die
+        die_nums_in_data = sorted(set(
+            extract_die_number(r.get('site_id', ''))
+            for r in raw if extract_die_number(r.get('site_id', '')) is not None))
+
+        if set(die_nums_in_data) != set(self._die_checkboxes.keys()):
+            # 기존 체크박스 제거
+            while self._die_cb_flow.count():
+                item = self._die_cb_flow.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
+            self._die_checkboxes.clear()
+
+            # 새 체크박스 생성
+            for d in die_nums_in_data:
+                cb = QCheckBox(f"Die {d + 1}")
+                cb.setChecked(True)
+                color = _color_from_die(d)
+                # matplotlib color (0-1 float) → hex
+                r_c, g_c, b_c = [int(c * 255) for c in color[:3]]
+                hex_c = f"#{r_c:02x}{g_c:02x}{b_c:02x}"
+                cb.setStyleSheet(f"""
+                    QCheckBox {{ color: {hex_c}; font-size: 8pt; font-weight: bold; border: none; }}
+                    QCheckBox::indicator {{ width: 12px; height: 12px; }}
+                    QCheckBox::indicator:unchecked {{ border: 1px solid #585b70; border-radius: 2px;
+                                                     background: {BG2}; }}
+                    QCheckBox::indicator:checked {{ border: 1px solid {hex_c}; border-radius: 2px;
+                                                   background: {hex_c}; }}
+                """)
+                cb.stateChanged.connect(self._on_die_filter_changed)
+                self._die_cb_flow.addWidget(cb)
+                self._die_checkboxes[d] = cb
+
+        # 필터 적용: 체크 해제된 Die 제외
+        excluded = {d for d, cb in self._die_checkboxes.items() if not cb.isChecked()}
+        if excluded:
+            data = [r for r in raw
+                    if extract_die_number(r.get('site_id', '')) not in excluded]
+            excluded_names = ', '.join(f'Die {d + 1}' for d in sorted(excluded))
+            count_removed = len(raw) - len(data)
+            self.filter_info_label.setText(
+                f"⚠ {excluded_names} 제외  |  "
+                f"{count_removed}개 제거 → {len(data)}개 분석 중 "
+                f"(전체 {len(raw)}개)")
+        else:
+            data = raw
+            self.filter_info_label.setText(f"✅ 전체 Die 분석 중 ({len(raw)}개)")
+
         self._update_cards(data, recipe)
-        self._update_die_avg_tables()
-        self._update_deviation_tables()
-        self._update_raw_table()
+        self._update_die_avg_tables()    # 원본 raw_data 기반 (필터 영향 없음)
+        self._update_deviation_tables()  # 원본 raw_data 기반 (필터 영향 없음)
+        self._update_raw_table()         # 원본 raw_data 기반 (필터 영향 없음)
         self._update_charts(data, result.get('trend', []), recipe)
+        self._render_die_position()
         stats = result.get('statistics', {})
         self.statusBar().showMessage(
             f"Step {recipe['index']}: {recipe['short_name']} — "
-            f"{stats.get('count', 0)}개 | Mean: {stats.get('mean', 0):.1f} | "
+            f"{len(data)}개 ({len(excluded)}개 Die 제외) | "
             f"이상치: {result.get('outlier_count', 0)}  💡 행 더블클릭 → TIFF")
 
     def _refresh_step_buttons(self):
@@ -1106,6 +1463,14 @@ class DataAnalyzerApp(QMainWindow):
             item_o.setTextAlignment(Qt.AlignCenter)
             t.setItem(row, 11, item_o)
 
+            # Sparkline Trend 데이터 (Lot별 Mean)
+            trend_item = QTableWidgetItem()
+            if i < len(recipe_results):
+                trend = recipe_results[i].get('trend', [])
+                if trend:
+                    means = [t_pt.get('mean', 0) for t_pt in trend]
+                    trend_item.setData(Qt.UserRole, means)
+            t.setItem(row, 12, trend_item)
 
     def _fill_die_avg_heatmap(self, table: CopyableTable, die_stats: list):
         table.clear()
@@ -1239,16 +1604,52 @@ class DataAnalyzerApp(QMainWindow):
         except Exception as e:
             self.logger.error(f"XY Scatter 차트 오류: {e}")
 
+        # ─── Pareto Chart (이상치 분석) ───
+        try:
+            pareto = compute_pareto_data(data, group_by='die')
+            self.chart_widgets['🔍 Pareto'].set_widget(
+                viz_pg.create_pareto_widget(pareto, title=f'{short} — Pareto'))
+        except Exception as e:
+            self.logger.error(f"Pareto 차트 오류: {e}")
+
+        # ─── Correlation Chart (X/Y 상관관계) ───
+        try:
+            if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
+                corr = compute_correlation(
+                    self._dev_x['die_stats'], self._dev_y['die_stats'])
+                self.chart_widgets['🔗 Correlation'].set_widget(
+                    viz_pg.create_correlation_widget(
+                        corr, title=f'{short} — X/Y Correlation'))
+        except Exception as e:
+            self.logger.error(f"Correlation 차트 오류: {e}")
+
+        # ─── 3D Surface (OpenGL) ───
+        try:
+            ds = self._dev_x.get('die_stats') or self._dev_y.get('die_stats')
+            if ds:
+                self.chart_widgets['🌐 3D Surface'].set_widget(
+                    viz_pg.create_3d_surface_widget(
+                        ds, title=f'{short} — 3D Surface'))
+        except Exception as e:
+            self.logger.error(f"3D Surface 오류: {e}")
+
         # ─── matplotlib 차트 (Contour/Vector — scipy 보간) ───
+        wr = self._get_wafer_radius_um()  # 웨이퍼 반경 (µm)
+        dyn = getattr(self, '_dynamic_die_positions', None)
+
         try:
             if self._dev_x.get('die_stats'):
                 self.chart_widgets['Contour X'].set_figure(
                     viz.plot_wafer_contour(self._dev_x['die_stats'],
-                                           title=f'{short} — X Wafer Contour'))
+                                           title=f'{short} — X Wafer Contour',
+                                           wafer_radius_um=wr,
+                                           dynamic_positions=dyn))
             if self._dev_y.get('die_stats'):
                 self.chart_widgets['Contour Y'].set_figure(
                     viz.plot_wafer_contour(self._dev_y['die_stats'],
-                                           title=f'{short} — Y Wafer Contour'))
+                                           title=f'{short} — Y Wafer Contour',
+                                           wafer_radius_um=wr,
+                                           dynamic_positions=dyn))
         except Exception as e:
             self.logger.error(f"Contour 차트 오류: {e}")
 
@@ -1258,20 +1659,104 @@ class DataAnalyzerApp(QMainWindow):
             if xy_prod:
                 prod_stats = [{'die': d, 'avg': v} for d, v in xy_prod.items()]
                 self.chart_widgets['X*Y Offset'].set_figure(
-                    viz.plot_wafer_contour(prod_stats, title=f'{short} — X*Y Offset'))
+                    viz.plot_wafer_contour(prod_stats, title=f'{short} — X*Y Offset',
+                                           wafer_radius_um=wr,
+                                           dynamic_positions=dyn))
         except Exception as e:
             self.logger.error(f"X*Y Offset 차트 오류: {e}")
 
         try:
             if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
+                scale_pct = self.vector_scale_slider.value()
                 self.chart_widgets['↗️ Vector Map'].set_figure(
                     viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
-                                        title=f'{short} — Vector Map'))
+                                        title=f'{short} — Vector Map',
+                                        wafer_radius_um=wr,
+                                        dynamic_positions=dyn,
+                                        scale_pct=scale_pct))
         except Exception as e:
             self.logger.error(f"Vector Map 차트 오류: {e}")
 
     def _render_die_position(self):
-        self.chart_widgets['Die Position'].set_figure(viz.plot_die_position_map())
+        dyn = getattr(self, '_dynamic_die_positions', None)
+        self.chart_widgets['Die Position'].set_figure(
+            viz.plot_die_position_map(dynamic_positions=dyn,
+                                       wafer_radius_um=self._get_wafer_radius_um()))
+
+    def _get_wafer_radius_um(self) -> float:
+        """현재 선택된 웨이퍼 반경 (µm)."""
+        idx = self.wafer_combo.currentIndex()
+        return 100_000 if idx == 0 else 150_000  # 200mm→100mm, 300mm→150mm
+
+    def _on_wafer_size_changed(self, index):
+        """웨이퍼 크기 변경 시 설정 저장 + 차트 갱신."""
+        size = 200 if index == 0 else 300
+        self.settings['wafer_size'] = size
+        save_settings(self.settings)
+        self.logger.info(f"Wafer 크기 변경: {size}mm (반경 {size // 2}mm)")
+        if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
+            result = self.recipe_results[self.current_recipe_idx]
+            recipe = self.recipes[self.current_recipe_idx]
+            self._display_result(result, recipe)
+
+    def _on_die_filter_changed(self, state):
+        """개별 Die 체크박스 변경 → 재분석."""
+        if self._die_filter_updating:
+            return
+        if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
+            result = self.recipe_results[self.current_recipe_idx]
+            recipe = self.recipes[self.current_recipe_idx]
+            self._display_result(result, recipe)
+
+    def _die_filter_select_all(self):
+        """전체 Die 선택."""
+        self._die_filter_updating = True
+        for cb in self._die_checkboxes.values():
+            cb.setChecked(True)
+        self._die_filter_updating = False
+        self._on_die_filter_changed(None)
+
+    def _die_filter_exclude_stabilization(self):
+        """안정화 Die 제외 — 첫 번째 측정 Die 체크 해제."""
+        if not self.recipe_results or self.current_recipe_idx >= len(self.recipe_results):
+            return
+        raw = self.recipe_results[self.current_recipe_idx].get('raw_data', [])
+        if not raw:
+            return
+        from analyzer import extract_die_number
+        first_die = extract_die_number(raw[0].get('site_id', ''))
+        if first_die is None:
+            return
+
+        # 먼저 전체 선택 후, 안정화 Die만 해제
+        self._die_filter_updating = True
+        for cb in self._die_checkboxes.values():
+            cb.setChecked(True)
+        if first_die in self._die_checkboxes:
+            self._die_checkboxes[first_die].setChecked(False)
+        self._die_filter_updating = False
+        self._on_die_filter_changed(None)
+
+    def _on_vector_scale_changed(self, value):
+        """화살표 배율 슬라이더 변경 시 Vector Map 재렌더링."""
+        self.vector_scale_label.setText(f"{value}%")
+        if not (self.recipe_results and self.current_recipe_idx < len(self.recipe_results)):
+            return
+        if not (self._dev_x.get('die_stats') and self._dev_y.get('die_stats')):
+            return
+        wr = self._get_wafer_radius_um()
+        dyn = getattr(self, '_dynamic_die_positions', None)
+        recipe = self.recipes[self.current_recipe_idx]
+        short = recipe.get('short_name', '')
+        try:
+            self.chart_widgets['↗️ Vector Map'].set_figure(
+                viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
+                                    title=f'{short} — Vector Map',
+                                    wafer_radius_um=wr,
+                                    dynamic_positions=dyn,
+                                    scale_pct=value))
+        except Exception as e:
+            self.logger.error(f"Vector Map 재렌더링 오류: {e}")
 
     # ──────────────────────────────────────────────
     # Repeat Contour Popup
@@ -1288,18 +1773,24 @@ class DataAnalyzerApp(QMainWindow):
         from scipy.interpolate import griddata
         from matplotlib.patches import Circle
         from matplotlib.colors import Normalize
+        from matplotlib.patheffects import withStroke
         import matplotlib.pyplot as plt
         import numpy as np
+
+        dyn = getattr(self, '_dynamic_die_positions', None)
 
         n = len(repeat_labels)
         cols = min(5, n)
         rows = math.ceil(n / cols)
-        fig, axes = plt.subplots(rows, cols, figsize=(4.5*cols, 4.5*rows), dpi=120)
-        fig.patch.set_facecolor('#ffffff')
+        cell = 4.2
+        fig, axes = plt.subplots(rows, cols,
+                                 figsize=(cell*cols, cell*rows + 0.8), dpi=110)
+        fig.patch.set_facecolor('#1e1e2e')
         if rows == 1 and cols == 1: axes = [[axes]]
         elif rows == 1: axes = [axes]
         elif cols == 1: axes = [[ax] for ax in axes]
 
+        # 전역 deviation 범위 (색상 스케일 통일)
         all_vals = [abs(matrix.get(rl, {}).get(dl, 0))
                     for rl in repeat_labels for dl in die_labels
                     if matrix.get(rl, {}).get(dl) is not None]
@@ -1308,46 +1799,87 @@ class DataAnalyzerApp(QMainWindow):
         for idx, rl in enumerate(repeat_labels):
             r, c = divmod(idx, cols)
             ax = axes[r][c]
+            ax.set_facecolor('#1e1e2e')
             positions, values = [], []
             for dl in die_labels:
                 v = matrix.get(rl, {}).get(dl)
-                pos = get_die_position(dl)
+                pos = get_die_position(dl, dyn)
                 if v is not None and pos is not None:
                     positions.append(pos); values.append(v)
             if len(positions) < 3:
                 ax.text(0.5, 0.5, 'N/A', ha='center', va='center',
-                        transform=ax.transAxes)
-                ax.set_title(rl, fontsize=10, fontweight='bold')
+                        transform=ax.transAxes, color='#555', fontsize=12)
+                ax.set_xlabel(rl, fontsize=10, fontweight='bold', color='#89b4fa')
                 continue
 
             xs = np.array([p[0] for p in positions], dtype=float)
             ys = np.array([p[1] for p in positions], dtype=float)
             zs = np.array(values, dtype=float)
-            margin = 1.0
+
+            # ── 원형 보정: 경계에 가상 포인트 추가 ──
+            data_r = float(np.sqrt(xs**2 + ys**2).max()) + 1.5
+            # 원 둘레에 36개 가상 포인트 → 부드러운 원형 경계
+            n_boundary = 36
+            angles = np.linspace(0, 2 * np.pi, n_boundary, endpoint=False)
+            bx = data_r * np.cos(angles)
+            by = data_r * np.sin(angles)
+            # 가상 포인트 값 = 가장 가까운 실제 Die의 값으로 보간
+            from scipy.spatial import cKDTree
+            tree = cKDTree(np.column_stack([xs, ys]))
+            _, nearest_idx = tree.query(np.column_stack([bx, by]))
+            bz = zs[nearest_idx]
+            # 원본 + 가상 포인트 합치기
+            xs_ext = np.concatenate([xs, bx])
+            ys_ext = np.concatenate([ys, by])
+            zs_ext = np.concatenate([zs, bz])
+
+            grid_res = 400
+            pad = data_r * 1.05
             xi2, yi2 = np.meshgrid(
-                np.linspace(xs.min()-margin, xs.max()+margin, 200),
-                np.linspace(ys.min()-margin, ys.max()+margin, 200))
-            zi = griddata((xs, ys), zs, (xi2, yi2), method='cubic')
-            wafer_r = max(abs(xs).max(), abs(ys).max()) + margin
-            zi[np.sqrt(xi2**2 + yi2**2) > wafer_r] = np.nan
+                np.linspace(-pad, pad, grid_res),
+                np.linspace(-pad, pad, grid_res))
+            zi = griddata((xs_ext, ys_ext), zs_ext, (xi2, yi2), method='cubic')
+            # 원형 마스킹
+            zi[np.sqrt(xi2**2 + yi2**2) > data_r] = np.nan
             norm = Normalize(vmin=-vmax_global, vmax=vmax_global)
             ax.contourf(xi2, yi2, zi, levels=50, cmap='RdYlGn', norm=norm, extend='both')
-            ax.add_patch(Circle((0, 0), wafer_r, fill=False, edgecolor='#555',
-                                linewidth=1.2, linestyle='--'))
-            ax.scatter(xs, ys, c='black', s=12, zorder=5)
+
+            # Die 위치 마커 (빈 원 ○)
+            ax.scatter(xs, ys, c='none', s=20, zorder=5,
+                       edgecolors='#ccc', linewidths=0.6)
+
+            # Die 값 (외곽선으로 시인성 확보)
+            outline_w = withStroke(linewidth=2.5, foreground='#1e1e2e')
+            for i, (x, y) in enumerate(zip(xs, ys)):
+                val = zs[i]
+                txt_color = '#ff6b6b' if abs(val) > vmax_global * 0.65 else '#e0e0e0'
+                ax.text(x, y + 0.5, f'{val:.2f}',
+                        ha='center', va='bottom', fontsize=5.5,
+                        color=txt_color, zorder=6,
+                        path_effects=[outline_w])
+
+            # 축 스타일 (레퍼런스와 동일)
+            lim = data_r * 1.12
+            ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
             ax.set_aspect('equal')
-            ax.set_title(rl, fontsize=10, fontweight='bold')
+            ax.tick_params(labelsize=6, colors='#666', direction='in',
+                           length=3, width=0.5)
+            for s in ax.spines.values():
+                s.set_color('#363650'); s.set_linewidth(0.5)
+            ax.set_xlabel(rl, fontsize=9, fontweight='bold', color='#89b4fa',
+                          labelpad=3)
 
         for idx in range(n, rows*cols):
             r, c = divmod(idx, cols)
             axes[r][c].set_visible(False)
 
-        fig.suptitle(f'{axis} Offset — Repeat별 Contour Map', fontsize=14, fontweight='bold')
-        fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig.suptitle(f'{axis} Offset — Repeat별 Contour Map', fontsize=14,
+                     fontweight='bold', color='#cdd6f4')
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Repeat별 Contour Map — {axis} Offset")
-        dlg.resize(1200, 700)
+        dlg.resize(1400, 850)
         layout = QVBoxLayout(dlg)
         canvas = FigureCanvasQTAgg(fig)
         toolbar = NavigationToolbar2QT(canvas, dlg)

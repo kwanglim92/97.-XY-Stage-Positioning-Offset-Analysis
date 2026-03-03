@@ -78,5 +78,6 @@
     "In-Die Align",
     "LLC Translation",
     "Global Align"
-  ]
+  ],
+  "wafer_size": 200
 }

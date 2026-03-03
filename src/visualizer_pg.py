@@ -592,3 +592,333 @@ def create_tiff_widget() -> MultiTiffViewerWidget:
     """빈 Multi-TIFF Viewer 위젯 생성."""
     return MultiTiffViewerWidget()
 
+
+# ═══════════════════════════════════════════════
+#  5. Pareto Chart (Die별 이상치 막대 + 누적%)
+# ═══════════════════════════════════════════════
+
+def create_pareto_widget(pareto_data: list,
+                         title: str = 'Pareto') -> pg.PlotWidget:
+    """Die/Lot별 이상치 빈도 파레토 차트.
+
+    Features:
+      - 내림차순 막대 그래프 (좌축: 이상치 개수)
+      - 누적 % 곡선 (우축: 0~100%)
+      - 80% 기준선 (빨간 점선)
+      - 호버 시 라벨 표시
+
+    Args:
+        pareto_data: compute_pareto_data() 결과
+            [{'label': 'Die5', 'count': 12, 'percent': 30.0, 'cumulative': 30.0}, ...]
+    """
+    widget = CrossHairPlotWidget()
+    plot = widget.getPlotItem()
+    _style_axis(plot, title=title, x_label='', y_label='이상치 수')
+
+    if not pareto_data:
+        # 이상치 없는 경우 안내 텍스트 표시
+        text = pg.TextItem("이상치가 없습니다 (Outlier = 0)", color=FG2,
+                           anchor=(0.5, 0.5))
+        text.setFont(pg.QtGui.QFont('', 12))
+        plot.addItem(text)
+        text.setPos(0.5, 0.5)
+        plot.setXRange(0, 1)
+        plot.setYRange(0, 1)
+        return widget
+
+    n = len(pareto_data)
+    labels = [d['label'] for d in pareto_data]
+    counts = [d['count'] for d in pareto_data]
+    cum_pcts = [d['cumulative'] for d in pareto_data]
+
+    # ─── 막대 그래프 (좌축) ───
+    x_pos = list(range(n))
+    bar_colors = [pg.mkColor(c) for c in _DIE_COLORS[:n]]
+
+    # 그라데이션 색상 적용
+    brushes = []
+    for i, c in enumerate(bar_colors):
+        c.setAlpha(200)
+        brushes.append(c)
+
+    bar = pg.BarGraphItem(x=x_pos, height=counts, width=0.6,
+                          brushes=brushes,
+                          pen=pg.mkPen('#45475a', width=1))
+    plot.addItem(bar)
+
+    # X축 라벨 설정
+    x_axis = plot.getAxis('bottom')
+    x_axis.setTicks([[(i, labels[i]) for i in range(n)]])
+
+    # 좌축 범위
+    max_count = max(counts) if counts else 1
+    plot.setYRange(0, max_count * 1.15)
+    plot.setXRange(-0.5, n - 0.5)
+
+    # ─── 누적 % 곡선 (우축) ───
+    # ViewBox 오버레이로 우축 추가
+    right_vb = pg.ViewBox()
+    plot.scene().addItem(right_vb)
+    plot.getAxis('right').linkToView(right_vb)
+    right_vb.setXLink(plot)
+    plot.getAxis('right').setLabel('누적 %', color=ORANGE)
+    plot.getAxis('right').setStyle(showValues=True)
+    plot.showAxis('right')
+
+    # ViewBox 크기 동기화
+    def update_views():
+        right_vb.setGeometry(plot.vb.sceneBoundingRect())
+        right_vb.linkedViewChanged(plot.vb, right_vb.XAxis)
+
+    plot.vb.sigResized.connect(update_views)
+
+    # 누적% 곡선
+    cum_curve = pg.PlotCurveItem(
+        x=x_pos, y=cum_pcts,
+        pen=_make_pen(ORANGE, width=3),
+        name='누적 %')
+    right_vb.addItem(cum_curve)
+
+    # 누적% 포인트
+    cum_scatter = pg.ScatterPlotItem(
+        x=x_pos, y=cum_pcts, size=8,
+        pen=pg.mkPen(ORANGE, width=1),
+        brush=pg.mkBrush(ORANGE))
+    right_vb.addItem(cum_scatter)
+
+    # 80% 기준선
+    threshold_line = pg.InfiniteLine(
+        pos=80.0, angle=0,
+        pen=pg.mkPen(RED, width=2, style=pg.QtCore.Qt.DashLine),
+        label='80%', labelOpts={'color': RED, 'position': 0.05})
+    right_vb.addItem(threshold_line)
+
+    right_vb.setYRange(0, 105)
+
+    # ─── CrossHair 데이터 설정 ───
+    snap_points = []
+    for i, d in enumerate(pareto_data):
+        label = f"{d['label']}: {d['count']}건 ({d['percent']}%)\n누적: {d['cumulative']}%"
+        snap_points.append((i, counts[i], label))
+    widget.set_data_points(snap_points)
+
+    update_views()
+    return widget
+
+
+# ═══════════════════════════════════════════════
+#  6. Correlation Chart (X/Y Die avg 상관)
+# ═══════════════════════════════════════════════
+
+def create_correlation_widget(corr_data: dict,
+                              title: str = 'X-Y Correlation') -> pg.PlotWidget:
+    """X/Y Die별 평균 편차 상관관계 산점도.
+
+    Features:
+      - Die별 색상 산점도
+      - 선형 회귀선 + R² 표시
+      - Zero 십자선 (원점 기준)
+      - 호버 시 Die 정보
+
+    Args:
+        corr_data: compute_correlation() 결과
+            {'pearson_r', 'r_squared', 'slope', 'intercept', 'points', 'n'}
+    """
+    widget = CrossHairPlotWidget()
+    plot = widget.getPlotItem()
+    _style_axis(plot, title=title, x_label='X Deviation (µm)', y_label='Y Deviation (µm)')
+
+    points = corr_data.get('points', [])
+    if not points:
+        text = pg.TextItem("상관관계 데이터 없음", color=FG2,
+                           anchor=(0.5, 0.5))
+        text.setFont(pg.QtGui.QFont('', 12))
+        plot.addItem(text)
+        text.setPos(0.5, 0.5)
+        return widget
+
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    die_labels = [p[2] for p in points]
+
+    # Zero 십자선
+    plot.addItem(pg.InfiniteLine(pos=0, angle=0,
+                 pen=pg.mkPen('#45475a', width=1, style=pg.QtCore.Qt.DashLine)))
+    plot.addItem(pg.InfiniteLine(pos=0, angle=90,
+                 pen=pg.mkPen('#45475a', width=1, style=pg.QtCore.Qt.DashLine)))
+
+    # Die별 색상 산점도
+    n = len(points)
+    spots = []
+    for i, (x, y, die) in enumerate(points):
+        color_idx = i % len(_DIE_COLORS)
+        spots.append({
+            'pos': (x, y),
+            'size': 12,
+            'pen': pg.mkPen(_DIE_COLORS[color_idx], width=1),
+            'brush': pg.mkBrush(_DIE_COLORS[color_idx]),
+            'data': die,
+        })
+
+    scatter = pg.ScatterPlotItem(spots=spots)
+    plot.addItem(scatter)
+
+    # 회귀선
+    slope = corr_data.get('slope', 0)
+    intercept = corr_data.get('intercept', 0)
+    r_sq = corr_data.get('r_squared', 0)
+    pearson_r = corr_data.get('pearson_r', 0)
+
+    if xs:
+        x_min, x_max = min(xs), max(xs)
+        margin = (x_max - x_min) * 0.1 or 0.5
+        rx = [x_min - margin, x_max + margin]
+        ry = [slope * x + intercept for x in rx]
+
+        plot.plot(rx, ry, pen=_make_pen(ACCENT, width=2, style=pg.QtCore.Qt.DashLine))
+
+    # R² 텍스트 표시
+    info_text = pg.TextItem(
+        f"R² = {r_sq:.4f}\nr = {pearson_r:.4f}\ny = {slope:.3f}x + {intercept:.3f}",
+        color=ACCENT, anchor=(0, 0))
+    info_text.setFont(pg.QtGui.QFont('', 10))
+    plot.addItem(info_text)
+
+    # 텍스트 위치: 좌상단
+    if xs and ys:
+        info_text.setPos(min(xs), max(ys))
+
+    # CrossHair 데이터
+    snap_points = []
+    for i, (x, y, die) in enumerate(points):
+        label = f"Die {die}\nX: {x:.3f} µm\nY: {y:.3f} µm"
+        snap_points.append((x, y, label))
+    widget.set_data_points(snap_points)
+
+    return widget
+
+
+# ═══════════════════════════════════════════════
+#  7. 3D Wafer Surface (pyqtgraph.opengl)
+# ═══════════════════════════════════════════════
+
+def create_3d_surface_widget(die_stats: list,
+                              title: str = '3D Surface') -> QWidget:
+    """Die별 평균 편차를 3D 표면 맵으로 시각화.
+
+    Features:
+      - scipy griddata 보간 → GLSurfacePlotItem
+      - Die 위치 ScatterPlot 마커
+      - 마우스 회전/줌/패닝
+      - 컬러맵: RdYlGn_r 스타일
+
+    Args:
+        die_stats: [{'die': 1, 'avg': 0.5, ...}, ...]
+    """
+    from PySide6.QtWidgets import QVBoxLayout, QLabel
+
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    # 제목
+    title_label = QLabel(f"  🌐 {title}")
+    title_label.setStyleSheet(f"color: {FG}; font-size: 10pt; font-weight: bold; "
+                               f"background: {BG2}; padding: 4px;")
+    layout.addWidget(title_label)
+
+    if not die_stats:
+        info = QLabel("Die 데이터 없음")
+        info.setStyleSheet(f"color: {FG2}; font-size: 11pt; padding: 40px;")
+        info.setAlignment(Qt.AlignCenter)
+        layout.addWidget(info, 1)
+        return container
+
+    try:
+        import pyqtgraph.opengl as gl
+        from scipy.interpolate import griddata
+    except ImportError as e:
+        info = QLabel(f"3D 표시 불가: {e}\npip install PyOpenGL scipy")
+        info.setStyleSheet(f"color: {RED}; font-size: 10pt; padding: 40px;")
+        info.setAlignment(Qt.AlignCenter)
+        layout.addWidget(info, 1)
+        return container
+
+    # Die 위치 매핑
+    from analyzer import DIE_POSITIONS, get_die_position
+
+    xs, ys, zs = [], [], []
+    for ds in die_stats:
+        pos = get_die_position(ds['die'])
+        if pos:
+            xs.append(pos[0])
+            ys.append(pos[1])
+            zs.append(ds['avg'])
+
+    if len(xs) < 4:
+        info = QLabel("3D 보간에 최소 4개 Die 필요")
+        info.setStyleSheet(f"color: {FG2}; font-size: 11pt; padding: 40px;")
+        info.setAlignment(Qt.AlignCenter)
+        layout.addWidget(info, 1)
+        return container
+
+    # 보간 그리드
+    import numpy as np
+
+    xi = np.linspace(min(xs) - 1, max(xs) + 1, 50)
+    yi = np.linspace(min(ys) - 1, max(ys) + 1, 50)
+    Xi, Yi = np.meshgrid(xi, yi)
+    Zi = griddata((xs, ys), zs, (Xi, Yi), method='cubic')
+
+    # NaN → 0 (보간 범위 밖)
+    Zi = np.nan_to_num(Zi, nan=0.0)
+
+    # 색상 맵 생성 (RdYlGn_r 스타일)
+    z_min, z_max = np.nanmin(zs), np.nanmax(zs)
+    z_range = z_max - z_min if z_max != z_min else 1.0
+
+    # normalize Zi for colormap
+    Zi_norm = (Zi - z_min) / z_range
+    Zi_norm = np.clip(Zi_norm, 0, 1)
+
+    # RGBA 색상 배열
+    colors = np.zeros((*Zi.shape, 4), dtype=np.float32)
+    # 파란색(낮은 값) → 초록 → 빨강(높은 값)
+    colors[..., 0] = Zi_norm  # R
+    colors[..., 1] = 1.0 - np.abs(Zi_norm - 0.5) * 2  # G (중간에서 최대)
+    colors[..., 2] = 1.0 - Zi_norm  # B
+    colors[..., 3] = 0.85  # Alpha
+
+    # GLViewWidget 생성
+    view = gl.GLViewWidget()
+    view.setBackgroundColor(BG)
+    view.setCameraPosition(distance=20, elevation=30, azimuth=45)
+
+    # Surface
+    surface = gl.GLSurfacePlotItem(
+        x=xi, y=yi, z=Zi,
+        colors=colors,
+        shader='shaded',
+        smooth=True)
+    view.addItem(surface)
+
+    # 그리드
+    grid = gl.GLGridItem()
+    grid.setSize(max(xs) - min(xs) + 4, max(ys) - min(ys) + 4, 0)
+    grid.setSpacing(1, 1, 1)
+    grid.translate(np.mean(xs), np.mean(ys), z_min - 0.5)
+    view.addItem(grid)
+
+    # Die 마커 (scatter)
+    die_points = np.array([[x, y, z + 0.1] for x, y, z in zip(xs, ys, zs)])
+    scatter = gl.GLScatterPlotItem(
+        pos=die_points,
+        size=8,
+        color=(1, 1, 1, 1),
+        pxMode=True)
+    view.addItem(scatter)
+
+    layout.addWidget(view, 1)
+    return container
+

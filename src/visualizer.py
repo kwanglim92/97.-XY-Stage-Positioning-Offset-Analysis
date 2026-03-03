@@ -8,6 +8,16 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 import io
 
+# ── 한국어 폰트 설정 (matplotlib 전역) ──
+import platform
+if platform.system() == 'Windows':
+    plt.rcParams['font.family'] = 'Malgun Gothic'
+elif platform.system() == 'Darwin':
+    plt.rcParams['font.family'] = 'AppleGothic'
+else:
+    plt.rcParams['font.family'] = 'NanumGothic'
+plt.rcParams['axes.unicode_minus'] = False
+
 
 # Recipe별 색상 팔레트
 RECIPE_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#E91E63',
@@ -432,64 +442,128 @@ def _color_from_die(die_idx, total=21):
 
 
 def plot_wafer_contour(die_stats: list, title: str = 'Wafer Contour',
-                       vmin: float = 0.0, vmax: float = 1.0) -> Figure:
-    """Die 좌표계 기반 원형 Wafer Contour Map.
+                       vmin: float = 0.0, vmax: float = 1.0,
+                       wafer_radius_um: float = 150_000,
+                       dynamic_positions: dict = None) -> Figure:
+    """Die 좌표계 기반 원형 Wafer Contour Map (µm 단위).
 
     Args:
-        die_stats: [{'die': 'Die0', 'avg': ...}, ...]
-        vmin, vmax: color range
+        die_stats: [{'die': 'Die1', 'avg': ...}, ...]
+        wafer_radius_um: 웨이퍼 반경 (µm) — 200mm=100000, 300mm=150000
+        dynamic_positions: 데이터 기반 동적 Die 좌표 dict
     """
     from scipy.interpolate import griddata
     from matplotlib.patches import Circle
+    from matplotlib.colors import Normalize
 
-    positions, values = [], []
+    positions, values, die_labels = [], [], []
     for ds in die_stats:
-        pos = get_die_position(ds['die'])
+        pos = get_die_position(ds['die'], dynamic_positions)
         if pos is not None:
-            positions.append(pos)
+            # mm → µm 변환
+            positions.append((pos[0] * 1000, pos[1] * 1000))
             values.append(abs(ds['avg']))
+            die_labels.append(ds['die'])
 
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(7, 7))
+    fig.patch.set_facecolor('#1e1e2e')
+    ax.set_facecolor('#262637')
 
     if len(positions) < 3:
         ax.text(0.5, 0.5, 'Insufficient Die data', ha='center', va='center',
-                transform=ax.transAxes, fontsize=14)
+                transform=ax.transAxes, fontsize=14, color='#cdd6f4')
         return fig
 
     xs = np.array([p[0] for p in positions], dtype=float)
     ys = np.array([p[1] for p in positions], dtype=float)
     zs = np.array(values, dtype=float)
 
-    grid_res = 200
-    margin = 1.0
-    x_range = np.linspace(xs.min() - margin, xs.max() + margin, grid_res)
-    y_range = np.linspace(ys.min() - margin, ys.max() + margin, grid_res)
+    # ── 원형 보정: 외곽 Die 기반 경계에 가상 포인트 추가 ──
+    # 측정 영역만 커버 (웨이퍼 엣지까지 확장하지 않음)
+    from scipy.spatial import cKDTree
+    data_r = float(np.sqrt(xs**2 + ys**2).max()) + 5000  # 외곽 Die + 5mm 여유
+    n_boundary = 48
+    angles = np.linspace(0, 2 * np.pi, n_boundary, endpoint=False)
+    bx = data_r * np.cos(angles)
+    by = data_r * np.sin(angles)
+    tree = cKDTree(np.column_stack([xs, ys]))
+    _, nearest_idx = tree.query(np.column_stack([bx, by]))
+    bz = zs[nearest_idx]
+    xs_ext = np.concatenate([xs, bx])
+    ys_ext = np.concatenate([ys, by])
+    zs_ext = np.concatenate([zs, bz])
+
+    # 고해상도 그리드 (400×400)
+    grid_res = 400
+    pad = data_r * 1.05
+    x_range = np.linspace(-pad, pad, grid_res)
+    y_range = np.linspace(-pad, pad, grid_res)
     xi, yi = np.meshgrid(x_range, y_range)
 
-    zi = griddata((xs, ys), zs, (xi, yi), method='cubic')
+    zi = griddata((xs_ext, ys_ext), zs_ext, (xi, yi), method='cubic')
 
-    # Circular wafer mask
-    wafer_radius = max(abs(xs).max(), abs(ys).max()) + margin
+    # 원형 마스킹 (측정 영역만)
     dist = np.sqrt(xi**2 + yi**2)
-    zi[dist > wafer_radius] = np.nan
+    zi[dist > data_r] = np.nan
 
-    from matplotlib.colors import Normalize
-    levels = np.linspace(vmin, vmax, 50)
-    norm = Normalize(vmin=vmin, vmax=vmax)
-    cf = ax.contourf(xi, yi, zi, levels=levels, cmap='RdYlBu_r', norm=norm, extend='both')
-    cbar = fig.colorbar(cf, ax=ax, shrink=0.8)
-    cbar.set_label('µm')
+    # Contour 렌더링 (30 레벨, 부드러운 그라데이션)
+    auto_vmin = float(np.nanmin(zs)) if vmin == 0.0 and vmax == 1.0 else vmin
+    auto_vmax = float(np.nanmax(zs)) if vmin == 0.0 and vmax == 1.0 else vmax
+    if auto_vmin == auto_vmax:
+        auto_vmax = auto_vmin + 0.1
+    levels = np.linspace(auto_vmin, auto_vmax, 30)
+    norm = Normalize(vmin=auto_vmin, vmax=auto_vmax)
 
-    ax.scatter(xs, ys, c='black', s=15, zorder=5)
+    cf = ax.contourf(xi, yi, zi, levels=levels, cmap='RdYlGn_r', norm=norm, extend='both')
 
-    circle = Circle((0, 0), wafer_radius, fill=False, edgecolor='gray',
-                     linewidth=1.5, linestyle='--')
-    ax.add_patch(circle)
+    # 원형 clip_path — 깔끔한 원형 클리핑 (matplotlib 버전 호환)
+    clip_circle = Circle((0, 0), wafer_radius_um, transform=ax.transData)
+    try:
+        # matplotlib >= 3.8
+        for artist in cf.artists if hasattr(cf, 'artists') else cf.collections:
+            artist.set_clip_path(clip_circle)
+    except (AttributeError, TypeError):
+        pass  # NaN 마스킹만으로 충분
 
+    # 웨이퍼 경계 원 (점선)
+    wafer_outline = Circle((0, 0), wafer_radius_um, fill=False,
+                            edgecolor='#888', linewidth=1.5,
+                            linestyle='--', alpha=0.7)
+    ax.add_patch(wafer_outline)
+
+    # Die 점 (작은 원)
+    ax.scatter(xs, ys, c='#1e1e2e', s=25, zorder=5,
+               edgecolors='white', linewidths=0.6, alpha=0.8)
+
+    # Die 값 annotation (흰색 + 검정 외곽선 + 반투명 배경으로 시인성 극대화)
+    from matplotlib.patheffects import withStroke
+    outline = withStroke(linewidth=4, foreground='black')
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        val = zs[i]
+        ax.text(x, y + wafer_radius_um * 0.04, f'{val:.2f}',
+                ha='center', va='bottom', fontsize=7.5, fontweight='bold',
+                color='white', zorder=6,
+                path_effects=[outline],
+                bbox=dict(boxstyle='round,pad=0.12', fc='black',
+                          ec='none', alpha=0.45))
+
+    # Colorbar
+    cbar = fig.colorbar(cf, ax=ax, shrink=0.75, pad=0.04)
+    cbar.set_label('Deviation (µm)', color='#aaa')
+    cbar.ax.yaxis.set_tick_params(color='#777')
+    for label in cbar.ax.get_yticklabels():
+        label.set_color('#aaa')
+
+    # 축 스타일
+    ax.set_xlim(-wafer_radius_um * 1.08, wafer_radius_um * 1.08)
+    ax.set_ylim(-wafer_radius_um * 1.08, wafer_radius_um * 1.08)
     ax.set_aspect('equal')
-    ax.set_xlabel('X (mm)')
-    ax.set_ylabel('Y (mm)')
-    ax.set_title(title, fontsize=11)
+    ax.set_xlabel('X (µm)', color='#aaa')
+    ax.set_ylabel('Y (µm)', color='#aaa')
+    ax.set_title(title, fontsize=11, color='#89b4fa')
+    ax.tick_params(colors='#777')
+    for s in ax.spines.values():
+        s.set_color('#363650')
     fig.tight_layout()
     return fig
 
@@ -509,7 +583,7 @@ def plot_xy_scatter(x_dev_result: dict, y_dev_result: dict,
     y_matrix = y_dev_result.get('matrix', {})
 
     for dl in die_labels:
-        idx = int(dl.replace('Die', ''))
+        idx = int(dl.replace('Die', '')) - 1  # 1-based label → 0-based index
         color = _color_from_die(idx)
         xvals, yvals = [], []
         for rl in repeat_labels:
@@ -534,39 +608,132 @@ def plot_xy_scatter(x_dev_result: dict, y_dev_result: dict,
     return fig
 
 
-def plot_die_position_map() -> Figure:
-    """21 Die 좌표 배치 참조도."""
-    fig, ax = plt.subplots(figsize=(5, 5))
+
+def plot_die_position_map(dynamic_positions: dict = None,
+                          wafer_radius_um: float = 150_000) -> Figure:
+    """21 Die 좌표 배치 참조도.
+
+    Args:
+        dynamic_positions: {0: (x_mm, y_mm), ...} — 데이터에서 추출된 실제 좌표
+        wafer_radius_um: 웨이퍼 반경 (µm) — 축 범위 결정용
+    """
+    fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor('#262637')
     ax.set_facecolor('#1e1e2e')
 
-    for i, (x, y) in enumerate(DIE_POSITIONS):
-        c = _color_from_die(i)
-        ax.scatter(x, y, c=[c], s=400, zorder=5, edgecolors='white', linewidths=0.5)
-        ax.annotate(str(i + 1), (x, y), ha='center', va='center',
-                    fontsize=8, fontweight='bold', color='white')
+    # 좌표 소스 결정
+    if dynamic_positions:
+        die_indices = sorted(dynamic_positions.keys())
+        positions = [(i, dynamic_positions[i]) for i in die_indices]
+    else:
+        positions = [(i, pos) for i, pos in enumerate(DIE_POSITIONS)]
 
-    ax.set_xlim(-8, 8); ax.set_ylim(-8, 8)
+    # mm → µm 변환하여 표시
+    positions_um = [(idx, (x * 1000, y * 1000)) for idx, (x, y) in positions]
+
+    # Die 마커 + 번호
+    sc_list = []
+    legend_handles = []
+    for die_idx, (x, y) in positions_um:
+        c = _color_from_die(die_idx)
+        sc = ax.scatter(x, y, c=[c], s=800, zorder=5, edgecolors='white', linewidths=0.8,
+                        label=f'Die {die_idx + 1}')
+        ax.annotate(str(die_idx + 1), (x, y), ha='center', va='center',
+                    fontsize=11, fontweight='bold', color='white', zorder=6)
+        sc_list.append((die_idx, x, y, sc))
+        legend_handles.append(sc)
+
+    # 측정 순서 화살표
+    for i in range(len(positions_um) - 1):
+        _, (x0, y0) = positions_um[i]
+        _, (x1, y1) = positions_um[i + 1]
+        ax.annotate('', xy=(x1, y1), xytext=(x0, y0),
+                    arrowprops=dict(arrowstyle='->', color='#585b70',
+                                    lw=0.8, connectionstyle='arc3,rad=0.15'),
+                    zorder=2)
+
+    # 호버 툴팁
+    hover_annot = ax.annotate('', xy=(0, 0), xytext=(15, 15),
+                               textcoords='offset points',
+                               bbox=dict(boxstyle='round,pad=0.4',
+                                         fc='#313244', ec='#89b4fa', alpha=0.95),
+                               color='white', fontsize=9,
+                               arrowprops=dict(arrowstyle='->', color='#89b4fa'),
+                               zorder=10)
+    hover_annot.set_visible(False)
+
+    def on_hover(event):
+        if event.inaxes != ax:
+            hover_annot.set_visible(False)
+            fig.canvas.draw_idle()
+            return
+        found = False
+        for die_idx, dx, dy, sc in sc_list:
+            contains, _ = sc.contains(event)
+            if contains:
+                hover_annot.xy = (dx, dy)
+                hover_annot.set_text(
+                    f"Die {die_idx + 1}\n"
+                    f"X: {dx:,.0f} µm\n"
+                    f"Y: {dy:,.0f} µm")
+                hover_annot.set_visible(True)
+                found = True
+                break
+        if not found:
+            hover_annot.set_visible(False)
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect('motion_notify_event', on_hover)
+
+    # 웨이퍼 경계 원 (점선, 반투명)
+    from matplotlib.patches import Circle
+    wafer_circle = Circle((0, 0), wafer_radius_um, fill=False,
+                           edgecolor='#888', linewidth=1.5,
+                           linestyle='--', alpha=0.5)
+    ax.add_patch(wafer_circle)
+
+    # 축 범위 — 웨이퍼 반경 기준
+    ax.set_xlim(-wafer_radius_um * 1.05, wafer_radius_um * 1.05)
+    ax.set_ylim(-wafer_radius_um * 1.05, wafer_radius_um * 1.05)
     ax.set_aspect('equal')
-    ax.set_xlabel('X (mm)', color='#aaa')
-    ax.set_ylabel('Y (mm)', color='#aaa')
-    ax.set_title('Die Position Map (21 Dies)', color='#89b4fa', fontsize=12)
+    ax.set_xlabel('X (µm)', color='#aaa')
+    ax.set_ylabel('Y (µm)', color='#aaa')
+    ax.set_title(f'Die Position Map ({len(positions_um)} Dies)',
+                 color='#89b4fa', fontsize=12)
     ax.tick_params(colors='#777')
     for s in ax.spines.values():
         s.set_color('#363650')
     ax.grid(True, alpha=0.15, color='#555')
+
+    # Die 범례 (우측)
+    leg = ax.legend(handles=legend_handles,
+                    loc='center left', bbox_to_anchor=(1.02, 0.5),
+                    fontsize=7, frameon=True, framealpha=0.7,
+                    facecolor='#313244', edgecolor='#45475a',
+                    labelcolor='#cdd6f4', ncol=1,
+                    markerscale=0.15, handletextpad=0.5,
+                    borderpad=0.4, labelspacing=0.5,
+                    handleheight=0.8)
+    leg.set_title('Die', prop={'size': 8, 'weight': 'bold'})
+    leg.get_title().set_color('#89b4fa')
+
     fig.tight_layout()
     return fig
 
 
+
 def plot_vector_map(x_die_stats: list, y_die_stats: list,
                     title: str = 'Vector Map (Quiver)',
-                    scale_factor: float = 1.0) -> Figure:
-    """Die별 XY Offset 벡터를 화살표(quiver)로 시각화.
+                    scale_pct: int = 10,
+                    wafer_radius_um: float = 150_000,
+                    dynamic_positions: dict = None) -> Figure:
+    """Die별 XY Offset 벡터를 화살표(quiver)로 시각화 (µm 단위).
 
     Args:
         x_die_stats, y_die_stats: compute_deviation_matrix()['die_stats']
-        scale_factor: 화살표 크기 배율 (1.0 = 자동)
+        scale_pct: 화살표 배율 (%) — 최대 벡터가 웨이퍼 반경의 N% 길이
+        wafer_radius_um: 웨이퍼 반경 (µm)
+        dynamic_positions: 데이터 기반 동적 Die 좌표 dict
     """
     from matplotlib.patches import Circle
     from matplotlib.colors import Normalize
@@ -586,11 +753,12 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
 
     xs, ys, us, vs, mags = [], [], [], [], []
     for d in common:
-        pos = get_die_position(d)
+        pos = get_die_position(d, dynamic_positions)
         if pos is None:
             continue
-        xs.append(pos[0])
-        ys.append(pos[1])
+        # mm → µm 변환
+        xs.append(pos[0] * 1000)
+        ys.append(pos[1] * 1000)
         us.append(x_map[d])
         vs.append(y_map[d])
         mags.append(np.sqrt(x_map[d]**2 + y_map[d]**2))
@@ -600,20 +768,25 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
     mags = np.array(mags)
 
     # Wafer boundary circle
-    wafer_r = max(np.abs(xs).max(), np.abs(ys).max()) + 1.5
-    circle = Circle((0, 0), wafer_r, fill=False, edgecolor='#555',
+    circle = Circle((0, 0), wafer_radius_um, fill=False, edgecolor='#555',
                      linewidth=1.5, linestyle='--')
     ax.add_patch(circle)
 
     # Die positions (background dots)
     ax.scatter(xs, ys, c='#45475a', s=120, zorder=2, edgecolors='#585b70', linewidths=0.5)
 
-    # Quiver
-    norm = Normalize(vmin=0, vmax=max(mags.max(), 0.01))
+    # Quiver — 슬라이더 배율(%) 기반 스케일링
+    # 최대 벡터가 웨이퍼 반경의 scale_pct% 길이가 되도록
+    max_mag = max(mags.max(), 0.001)
+    target_arrow_len = wafer_radius_um * (scale_pct / 100.0)
+    arrow_scale = max_mag / target_arrow_len
+
+    norm = Normalize(vmin=0, vmax=max_mag)
     q = ax.quiver(xs, ys, us, vs, mags, cmap='hot_r', norm=norm,
                   angles='xy', scale_units='xy',
-                  scale=max(mags.max(), 0.01) / 1.5 * scale_factor,
-                  width=0.015, headwidth=3.5, headlength=4, zorder=5)
+                  scale=arrow_scale,
+                  width=0.007, headwidth=4, headlength=5,
+                  minlength=0.5, zorder=5)
 
     cbar = fig.colorbar(q, ax=ax, shrink=0.75, pad=0.04)
     cbar.set_label('Magnitude (µm)', color='#aaa')
@@ -623,17 +796,17 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
 
     # Die labels
     for i, d in enumerate(common):
-        pos = get_die_position(d)
+        pos = get_die_position(d, dynamic_positions)
         if pos:
-            ax.annotate(d.replace('Die', ''), (pos[0], pos[1]),
+            ax.annotate(d.replace('Die', ''), (pos[0] * 1000, pos[1] * 1000),
                         textcoords='offset points', xytext=(6, 6),
                         fontsize=7, color='#89b4fa', fontweight='bold')
 
-    ax.set_xlim(-wafer_r - 0.5, wafer_r + 0.5)
-    ax.set_ylim(-wafer_r - 0.5, wafer_r + 0.5)
+    ax.set_xlim(-wafer_radius_um * 1.05, wafer_radius_um * 1.05)
+    ax.set_ylim(-wafer_radius_um * 1.05, wafer_radius_um * 1.05)
     ax.set_aspect('equal')
-    ax.set_xlabel('X (mm)', color='#aaa')
-    ax.set_ylabel('Y (mm)', color='#aaa')
+    ax.set_xlabel('X (µm)', color='#aaa')
+    ax.set_ylabel('Y (µm)', color='#aaa')
     ax.set_title(title, color='#89b4fa', fontsize=12)
     ax.tick_params(colors='#777')
     for s in ax.spines.values():

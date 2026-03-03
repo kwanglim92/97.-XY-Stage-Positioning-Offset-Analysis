@@ -321,7 +321,7 @@ def compare_1st_2nd_by_site(data_1st: list, data_2nd: list, metric_key: str = 'v
 # Die-based Deviation Analysis (from xy_stage_offset plugin)
 # ──────────────────────────────────────────────
 
-# 21 Die 표준 좌표 (wafer 좌표계)
+# 21 Die 표준 좌표 (wafer 좌표계) — fallback 용
 DIE_POSITIONS = [
     (0, 0),   (2, 0),   (4, 0),   (6, 0),   (2, 2),
     (4, 4),   (0, 2),   (0, 4),   (0, 6),   (-2, 2),
@@ -329,6 +329,45 @@ DIE_POSITIONS = [
     (-4, -4), (0, -2),  (0, -4),  (0, -6),  (2, -2),
     (4, -4),
 ]
+
+
+def extract_die_positions(data: list) -> dict:
+    """측정 데이터에서 Die별 실제 스테이지 좌표 추출.
+
+    raw_data의 x_um, y_um 필드를 Die 번호별로 그룹핑하여
+    평균 좌표를 계산합니다.
+
+    Args:
+        data: raw_data 리스트 (x_um, y_um, site_id 필드 필요)
+
+    Returns:
+        {0: (x_mm, y_mm), 1: (x_mm, y_mm), ...}
+        Die 번호(0-based) → (x_mm, y_mm) 튜플
+    """
+    die_coords = {}  # die_idx -> {'xs': [], 'ys': []}
+
+    for r in data:
+        die_idx = extract_die_number(r.get('site_id', ''))
+        if die_idx is None:
+            continue
+        x_um = r.get('x_um', 0)
+        y_um = r.get('y_um', 0)
+        if x_um == 0 and y_um == 0:
+            continue
+
+        if die_idx not in die_coords:
+            die_coords[die_idx] = {'xs': [], 'ys': []}
+        die_coords[die_idx]['xs'].append(x_um)
+        die_coords[die_idx]['ys'].append(y_um)
+
+    # 평균 좌표 계산 (µm → mm 변환)
+    positions = {}
+    for die_idx, coords in sorted(die_coords.items()):
+        avg_x = sum(coords['xs']) / len(coords['xs']) / 1000.0  # µm → mm
+        avg_y = sum(coords['ys']) / len(coords['ys']) / 1000.0
+        positions[die_idx] = (round(avg_x, 3), round(avg_y, 3))
+
+    return positions
 
 
 def extract_die_number(site_id: str) -> Optional[int]:
@@ -342,16 +381,45 @@ def extract_die_number(site_id: str) -> Optional[int]:
     return None
 
 
-def get_die_position(die_label: str) -> Optional[tuple]:
-    """Die 라벨 → wafer 좌표. 'Die0' → (0,0)"""
+def get_die_position(die_label: str, dynamic_positions: dict = None) -> Optional[tuple]:
+    """Die 라벨 → wafer 좌표. 'Die1' → index 0 → (x, y)
+
+    Args:
+        die_label: 'Die1', 'Die2', ... (1-based 표기)
+        dynamic_positions: extract_die_positions()에서 반환된 동적 좌표 dict
+                          None이면 하드코딩된 DIE_POSITIONS 사용
+    """
     import re
     m = re.match(r'Die(\d+)', die_label)
     if not m:
         return None
-    idx = int(m.group(1))
+    die_num_1based = int(m.group(1))
+    idx = die_num_1based - 1  # 1-based label → 0-based index
+
+    # 동적 좌표 우선
+    if dynamic_positions and idx in dynamic_positions:
+        return dynamic_positions[idx]
+
+    # fallback: 하드코딩 좌표
     if 0 <= idx < len(DIE_POSITIONS):
         return DIE_POSITIONS[idx]
     return None
+
+
+def filter_stabilization_die(data: list) -> list:
+    """안정화 Die 제외: 각 Recipe의 가장 처음 측정된 Die를 제거.
+
+    측정 순서상 첫 번째 site_id의 Die 번호를 찾아서,
+    해당 Die 번호의 모든 데이터를 제외합니다.
+    """
+    if not data:
+        return data
+    # 첫 번째 측정의 Die 번호 추출
+    first_die = extract_die_number(data[0].get('site_id', ''))
+    if first_die is None:
+        return data
+    # 해당 Die 번호의 모든 데이터 제외
+    return [r for r in data if extract_die_number(r.get('site_id', '')) != first_die]
 
 
 def compute_deviation_matrix(data: list, method: str = 'X',
@@ -399,7 +467,7 @@ def compute_deviation_matrix(data: list, method: str = 'X',
             seen.append(lot)
     repeat_map = {name: i for i, name in enumerate(seen)}
 
-    die_labels = [f"Die{d}" for d in die_numbers]
+    die_labels = [f"Die{d + 1}" for d in die_numbers]  # 1-based 표기
     repeat_labels = list(seen)
 
     # 5) Build deviation matrix (nm → µm)
@@ -408,7 +476,7 @@ def compute_deviation_matrix(data: list, method: str = 'X',
         matrix[rl] = {dl: None for dl in die_labels}
 
     for r in valid:
-        die_label = f"Die{r['_die_num']}"
+        die_label = f"Die{r['_die_num'] + 1}"  # 1-based 표기
         lot = r.get('lot_name', '')
         if lot in matrix and die_label in matrix[lot]:
             deviation = (r[metric_key] - average) / 1000.0
@@ -581,7 +649,7 @@ def compute_pareto_data(data: list, group_by: str = 'die') -> list:
             continue
         if group_by == 'die':
             die_num = extract_die_number(r.get('site_id', ''))
-            key = f'Die{die_num}' if die_num is not None else 'Unknown'
+            key = f'Die{die_num + 1}' if die_num is not None else 'Unknown'  # 1-based
         else:
             key = r.get('lot_name', 'Unknown')
         counts[key] = counts.get(key, 0) + 1

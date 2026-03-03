@@ -40,6 +40,7 @@ DEFAULT_SETTINGS = {
         'LLC Translation',
         'Global Align',
     ],
+    'wafer_size': 300,  # 웨이퍼 크기 (mm): 200 또는 300
 }
 
 
