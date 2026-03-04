@@ -1,0 +1,95 @@
+# Control Chart — PostgreSQL 전환 워크스루
+
+## 현재 아키텍처 (전환 완료)
+
+```mermaid
+graph LR
+    subgraph "로컬 PC (개발)"
+        A[Streamlit App] --> B[(PostgreSQL 16.13<br/>localhost:5432)]
+    end
+    subgraph "서버 PC (운영)"
+        C[Docker: App] --> D[(Docker: PostgreSQL 16<br/>pgdata 볼륨)]
+    end
+    A -- git push --> F((GitHub))
+    F -- git pull --> C
+```
+
+> **로컬/서버 모두 PostgreSQL** — Dual-DB 호환성 문제 완전 해소
+
+## 오늘 수정한 항목 (12건)
+
+| # | 커밋 | 파일 | 수정 내용 |
+|---|------|------|----------|
+| 1 | `d901984` | [database.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/modules/database.py) | SAVEPOINT ALTER TABLE |
+| 2 | `5bf92b5` | database.py | cursor.close() 추가 |
+| 3 | `e40b9f0` | database.py | datetime/INSERT OR/IntegrityError |
+| 4 | `6d3ac37` | [option_manager.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/modules/option_manager.py) | BOOLEAN `=1/0` → `=TRUE/FALSE` |
+| 5 | `e752629` | database.py | strftime/date/GROUP_CONCAT |
+| 6 | `423a2b0` | database.py | sqlite_master/PRAGMA/VACUUM |
+| 7 | `8a68d24` | [data_maintenance_tab.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/tabs/data_maintenance_tab.py) | 스키마 뷰어 동적 컬럼 |
+| 8 | `2b11ea4` | option_manager.py | BOOLEAN 데이터 튜플 `True`/`False` |
+| 9 | `1d3961d` | [db_backup.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/modules/db_backup.py) | sqlite3 직접연결 → `get_connection()` 전환 |
+| 10 | `76cb425` | [approval_queue_tab.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/tabs/approval_queue_tab.py) | 출고일 `DateColumn` → `TextColumn` |
+| 11 | 여러 커밋 | [migrate_sqlite_to_pg.py](file:///c:/Users/Spare/Desktop/03.%20Program/Control_Chart/migrate_sqlite_to_pg.py) | 마이그레이션 스크립트 (스키마 차이·타입 안전·ID 매핑) |
+| 12 | `ccb3307` | migrate_sqlite_to_pg.py | 로컬/Docker 경로 자동 감지 |
+
+## 에러 근본 원인
+
+SQLite는 타입이 느슨하여 로컬 테스트로는 발견 불가능한 문제들:
+
+| SQLite (허용) | PostgreSQL (에러) |
+|--------------|------------------|
+| BOOLEAN에 정수 `1`/`0` | `TRUE`/`FALSE`만 허용 |
+| REAL에 텍스트 `"Yes"` | 숫자만 허용 |
+| `sqlite_master`, `PRAGMA` | `pg_tables`, `information_schema` |
+| `strftime()`, `date()` | `TO_CHAR()`, `NOW()-INTERVAL` |
+
+## 로컬 PostgreSQL 설정 (완료)
+
+| 항목 | 값 |
+|------|-----|
+| 버전 | PostgreSQL 16.13 |
+| 사용자 | `ccuser` / `ccpass123` |
+| DB | `controlchart` |
+| 환경변수 | `DATABASE_URL=postgresql://ccuser:ccpass123@localhost:5432/controlchart` |
+
+**마이그레이션 결과:**
+
+| 테이블 | 로컬 (SQLite→PG) | 서버 (SQLite→PG) |
+|--------|------------------|------------------|
+| 장비 | 626건 ✅ | 648건 ✅ |
+| 측정 | 21,071건 ✅ | 24,759건 ✅ |
+| 스펙 | 9,856건 ✅ | 9,856건 ✅ |
+
+## 유지보수 워크플로우
+
+### 일상 운영
+
+```
+[로컬] 코드 수정 → 로컬 PG 테스트 → git push
+                                        ↓
+[서버] git pull origin main → 자동 반영 (코드 마운트)
+```
+
+> [!IMPORTANT]
+> `git pull`만으로 반영됩니다. `docker compose restart`/`rebuild`는 **Dockerfile·requirements.txt 변경 시에만** 필요.
+
+### 서버 관리 명령어
+
+| 작업 | 명령어 |
+|------|--------|
+| 상태 확인 | `docker compose ps` |
+| 앱 재시작 (DB 유지) | `docker compose restart app` |
+| 로그 확인 | `docker compose logs app --tail 50` |
+| DB 직접 쿼리 | `docker compose exec db psql -U ccuser -d controlchart` |
+
+> [!CAUTION]
+> `docker compose down -v`는 **pgdata 볼륨을 삭제**합니다. 반드시 `docker compose down` (v 없이) 사용.
+
+### 새 SQL 쿼리 작성 규칙
+
+로컬/서버 모두 PostgreSQL이므로 **PostgreSQL 문법만** 사용:
+- `%s` 파라미터 (wrapper가 자동 처리)
+- `TRUE`/`FALSE` (Python `True`/`False`)
+- `TO_CHAR()`, `NOW()`, `INTERVAL`
+- `INSERT ... ON CONFLICT DO UPDATE/NOTHING`

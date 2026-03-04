@@ -292,66 +292,72 @@ def plot_tiff_profile(data_2d, info: dict,
 # ──────────────────────────────────────────────
 
 def plot_recipe_comparison_boxplot(recipe_results: list) -> Figure:
-    """Recipe별 박스플롯 비교 (나란히)"""
+    """Recipe별 박스플롯 비교 (X/Y 분리, 2행)"""
     n = len(recipe_results)
     if n == 0:
         fig, ax = plt.subplots()
         return fig
 
-    fig, axes = plt.subplots(1, n, figsize=(4 * n, 6), sharey=True)
+    fig, axes = plt.subplots(2, n, figsize=(4 * n, 8), sharey='row')
     if n == 1:
-        axes = [axes]
+        axes = axes.reshape(2, 1)
 
-    for i, result in enumerate(recipe_results):
-        ax = axes[i]
-        data = result.get('raw_data', [])
-        color = RECIPE_COLORS[i % len(RECIPE_COLORS)]
+    for row, axis_name in enumerate(['X', 'Y']):
+        for i, result in enumerate(recipe_results):
+            ax = axes[row][i]
+            data = result.get('raw_data', [])
+            color = RECIPE_COLORS[i % len(RECIPE_COLORS)]
 
-        values = [r.get('value', 0) for r in data
-                  if isinstance(r.get('value'), (int, float))]
+            values = [r.get('value', 0) for r in data
+                      if isinstance(r.get('value'), (int, float))
+                      and r.get('method') == axis_name]
 
-        if values:
-            bp = ax.boxplot([values], patch_artist=True,
-                            boxprops=dict(facecolor=color + '40',
-                                          edgecolor=color),
-                            medianprops=dict(color='#D32F2F', linewidth=2),
-                            flierprops=dict(marker='o', markerfacecolor='#FF5722',
-                                            markersize=3))
+            if values:
+                bp = ax.boxplot([values], patch_artist=True,
+                                boxprops=dict(facecolor=color + '40',
+                                              edgecolor=color),
+                                medianprops=dict(color='#D32F2F', linewidth=2),
+                                flierprops=dict(marker='o', markerfacecolor='#FF5722',
+                                                markersize=3))
 
-        stats = result.get('statistics', {})
-        ax.set_title(f'{result.get("short_name", "?")}\n'
-                     f'μ={stats.get("mean", 0):.0f}  σ={stats.get("stdev", 0):.0f}',
-                     fontsize=9)
-        ax.grid(True, alpha=0.3, axis='y')
+            stats_vals = np.array(values) if values else np.array([0])
+            ax.set_title(f'{result.get("short_name", "?")} ({axis_name})\n'
+                         f'μ={np.mean(stats_vals):.0f}  σ={np.std(stats_vals):.0f}',
+                         fontsize=9)
+            ax.grid(True, alpha=0.3, axis='y')
 
-    axes[0].set_ylabel('HZ1_O (nm)')
-    fig.suptitle('Recipe Comparison', fontsize=12, fontweight='bold')
+        axes[row][0].set_ylabel(f'{axis_name} Offset (nm)')
+
+    fig.suptitle('Recipe Comparison (X / Y)', fontsize=12, fontweight='bold')
     fig.tight_layout()
     return fig
 
 
 def plot_recipe_comparison_trend(recipe_results: list) -> Figure:
-    """Recipe별 트렌드 오버레이"""
-    fig, ax = plt.subplots(figsize=(12, 6))
+    """Recipe별 트렌드 오버레이 (X/Y 분리, 2행)"""
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-    for i, result in enumerate(recipe_results):
-        trend = result.get('trend', [])
-        if not trend:
-            continue
+    for row, axis_name in enumerate(['X', 'Y']):
+        ax = axes[row]
+        for i, result in enumerate(recipe_results):
+            # trend_x/trend_y 우선, 없으면 기존 trend 사용
+            trend = result.get(f'trend_{axis_name.lower()}', [])
+            if not trend:
+                continue
 
-        color = RECIPE_COLORS[i % len(RECIPE_COLORS)]
-        indices = [t['lot_index'] for t in trend]
-        means = [t['mean'] for t in trend]
+            color = RECIPE_COLORS[i % len(RECIPE_COLORS)]
+            indices = [t['lot_index'] for t in trend]
+            means = [t['mean'] for t in trend]
 
-        ax.plot(indices, means, 'o-', color=color, linewidth=2,
-                markersize=5, label=result.get('short_name', f'Recipe {i+1}'))
+            ax.plot(indices, means, 'o-', color=color, linewidth=2,
+                    markersize=5, label=result.get('short_name', f'Recipe {i+1}'))
 
-    ax.set_xlabel('Lot Index')
-    ax.set_ylabel('Mean HZ1_O (nm)')
-    ax.set_title('Recipe Trend Comparison')
-    ax.legend(loc='best')
-    ax.grid(True, alpha=0.3)
+        ax.set_ylabel(f'{axis_name} Offset (nm)')
+        ax.set_title(f'Recipe Trend Comparison — {axis_name}')
+        ax.legend(loc='best', fontsize=8)
+        ax.grid(True, alpha=0.3)
 
+    axes[1].set_xlabel('Lot Index')
     fig.tight_layout()
     return fig
 
@@ -617,7 +623,7 @@ def plot_die_position_map(dynamic_positions: dict = None,
         dynamic_positions: {0: (x_mm, y_mm), ...} — 데이터에서 추출된 실제 좌표
         wafer_radius_um: 웨이퍼 반경 (µm) — 축 범위 결정용
     """
-    fig, ax = plt.subplots(figsize=(7, 7))
+    fig, ax = plt.subplots(figsize=(8, 7))
     fig.patch.set_facecolor('#262637')
     ax.set_facecolor('#1e1e2e')
 
@@ -708,13 +714,13 @@ def plot_die_position_map(dynamic_positions: dict = None,
     # Die 범례 (우측)
     leg = ax.legend(handles=legend_handles,
                     loc='center left', bbox_to_anchor=(1.02, 0.5),
-                    fontsize=7, frameon=True, framealpha=0.7,
+                    fontsize=9, frameon=True, framealpha=0.7,
                     facecolor='#313244', edgecolor='#45475a',
                     labelcolor='#cdd6f4', ncol=1,
-                    markerscale=0.15, handletextpad=0.5,
-                    borderpad=0.4, labelspacing=0.5,
-                    handleheight=0.8)
-    leg.set_title('Die', prop={'size': 8, 'weight': 'bold'})
+                    markerscale=0.6, handletextpad=0.5,
+                    borderpad=0.6, labelspacing=1.2,
+                    handleheight=1.0)
+    leg.set_title('Die', prop={'size': 10, 'weight': 'bold'})
     leg.get_title().set_color('#89b4fa')
 
     fig.tight_layout()

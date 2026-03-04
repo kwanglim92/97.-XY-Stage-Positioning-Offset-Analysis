@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QPushButton, QLabel, QLineEdit, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-    QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox,
+    QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox, QInputDialog,
     QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
@@ -42,7 +42,7 @@ from analyzer import (
 )
 from exporter import export_combined_csv, export_excel_report
 from settings import load_settings, save_settings, add_recent_folder
-from sparkline_delegate import SparklineTrendDelegate
+## sparkline_delegate not currently used (gauge removed)
 from recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
 import visualizer as viz
 import visualizer_pg as viz_pg
@@ -358,7 +358,9 @@ class StatCard(QFrame):
         super().__init__(parent)
         self.setObjectName("statcard")
         self.setStyleSheet(f"""
-            #statcard {{ background: {BG2}; border-radius: 6px; padding: 8px; }}
+            #statcard {{ background: {BG2}; border: 1px solid #585b70;
+                         border-radius: 6px; padding: 8px; }}
+            #statcard QLabel {{ background: transparent; }}
         """)
         layout = QVBoxLayout(self)
         layout.setSpacing(2)
@@ -368,8 +370,8 @@ class StatCard(QFrame):
         layout.addWidget(lbl_title)
 
         self.lbl_avg = self._row(layout, "Avg (nm):")
-        self.lbl_rng = self._row(layout, "Dev Range (µm):")
-        self.lbl_std = self._row(layout, "Dev StdDev (µm):")
+        self.lbl_rng, self.lbl_rng_spec = self._row_with_spec(layout, "Dev Range (µm):")
+        self.lbl_std, self.lbl_std_spec = self._row_with_spec(layout, "Dev StdDev (µm):")
         self.lbl_cpk = self._row(layout, "Cpk:")
 
         self.badge = QLabel("—")
@@ -392,11 +394,56 @@ class StatCard(QFrame):
         layout.addLayout(row)
         return val
 
-    def update_stats(self, avg, rng, std, cpk, is_pass: bool = None):
+    def _row_with_spec(self, layout, label_text):
+        row = QHBoxLayout()
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
+        val = QLabel("—")
+        val.setAlignment(Qt.AlignRight)
+        val.setStyleSheet(f"color: {FG}; font-weight: bold; font-size: 12pt;")
+        spec_lbl = QLabel("")
+        spec_lbl.setAlignment(Qt.AlignRight)
+        spec_lbl.setStyleSheet(f"font-size: 9pt; min-width: 90px;")
+        row.addWidget(lbl)
+        row.addStretch()
+        row.addWidget(val)
+        row.addWidget(spec_lbl)
+        layout.addLayout(row)
+        return val, spec_lbl
+
+    def _format_spec_delta(self, value, spec):
+        """Spec 대비 표기 생성: 초과=빨강▲, 여유=초록✓"""
+        if spec is None or spec == 0:
+            return "", ""
+        ratio = value / spec * 100
+        if value > spec:
+            pct = ratio - 100
+            text = f"/ {spec}  ▲+{pct:.0f}%"
+            color = RED
+        else:
+            pct = 100 - ratio
+            text = f"/ {spec}  ✓{pct:.0f}%"
+            color = GREEN
+        return text, color
+
+    def update_stats(self, avg, rng, std, cpk, is_pass: bool = None,
+                     spec_r=None, spec_s=None):
         self.lbl_avg.setText(f"{avg:.3f}")
         self.lbl_rng.setText(f"{rng:.3f}")
         self.lbl_std.setText(f"{std:.3f}")
         self.lbl_cpk.setText(f"{cpk:.2f}")
+
+        # Spec 대비 표기
+        rng_text, rng_color = self._format_spec_delta(rng, spec_r)
+        self.lbl_rng_spec.setText(rng_text)
+        self.lbl_rng_spec.setStyleSheet(
+            f"font-size: 9pt; color: {rng_color}; min-width: 90px;")
+
+        std_text, std_color = self._format_spec_delta(std, spec_s)
+        self.lbl_std_spec.setText(std_text)
+        self.lbl_std_spec.setStyleSheet(
+            f"font-size: 9pt; color: {std_color}; min-width: 90px;")
+
         if is_pass is None:
             self.badge.setText("—")
             self.badge.setStyleSheet(
@@ -487,6 +534,11 @@ class DataAnalyzerApp(QMainWindow):
         self._dev_y = {}
         self._loader_thread = None
         self.step_pass_states = {}  # {idx: True/False/None}
+        self._trend_data_x = []  # 현재 Step의 X trend 원본 (Lot 필터용)
+        self._trend_data_y = []  # 현재 Step의 Y trend 원본
+        self._trend_spec = None  # Spec 한계선용
+        self._lot_filter_updating = False
+        self._lot_checkboxes = {}  # {lot_name: QCheckBox}
 
         self._build_ui()
         self._restore_settings()
@@ -656,19 +708,15 @@ class DataAnalyzerApp(QMainWindow):
 
         # Sub 1: Summary
         self.sum_table = CopyableTable()
-        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과', 'Trend']
+        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과']
         self.sum_table.setColumnCount(len(cols_s))
         self.sum_table.setHorizontalHeaderLabels(cols_s)
         hdr = self.sum_table.horizontalHeader()
-        # 좁은 컬럼: R(1), Out(8), X(9), Y(10), 결과(11), Trend(12)
         for col in range(len(cols_s)):
             hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45), (12, 80)]:
+        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45)]:
             hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.sum_table.setColumnWidth(col, width)
-        # Sparkline delegate 적용
-        self._sparkline_delegate = SparklineTrendDelegate(self.sum_table)
-        self.sum_table.setItemDelegateForColumn(12, self._sparkline_delegate)
         self.data_tabs.addTab(self.sum_table, "📊 Summary")
 
         # Sub 2: Die 평균 (X/Y sub-tabs)
@@ -752,7 +800,55 @@ class DataAnalyzerApp(QMainWindow):
             if register:
                 self.chart_widgets[name] = widget
 
-        for name in ['Contour X', 'Contour Y', 'X*Y Offset', 'Die Position']:
+        # Contour X/Y — Repeat Contour 버튼을 컨테이너에 포함하여 차트 짤림 방지
+        _contour_help = (
+            "Contour Map 색상 안내\n\n"
+            "색상은 편차의 ± 방향을 나타냅니다:\n"
+            "  🟢 초록 = 양(+) 방향 오프셋\n"
+            "  🟡 노랑 = 0 근처 (편차 없음)\n"
+            "  🔴 빨강 = 음(−) 방향 오프셋\n\n"
+            "• 색상 대비가 클수록 공간적 편향 존재\n"
+            "• 한쪽 빨강 ↔ 반대쪽 초록 = Stage Tilt\n"
+            "• 전체가 한 색으로 치우침 = Translation Offset\n\n"
+            "💡 Raw Deviation 테이블은 |절대값| 기준이므로\n"
+            "   색상이 다를 수 있습니다 (크기 vs 방향)")
+        for axis_name in ('Contour X', 'Contour Y'):
+            axis = 'X' if 'X' in axis_name else 'Y'
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(2)
+
+            toolbar_row = QHBoxLayout()
+            toolbar_row.setContentsMargins(8, 4, 8, 0)
+            btn = QPushButton(f"🗺️ Repeat별 Contour ({axis})")
+            btn.clicked.connect(partial(self._open_repeat_contour, axis))
+            toolbar_row.addWidget(btn)
+
+            help_btn = QPushButton("?")
+            help_btn.setFixedSize(22, 22)
+            help_btn.setCursor(Qt.WhatsThisCursor)
+            help_btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {FG2};
+                              border: 1px solid #585b70; border-radius: 11px;
+                              font-size: 10pt; font-weight: bold; }}
+                QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+            """)
+            help_btn.setToolTip(_contour_help)
+            help_btn.clicked.connect(
+                lambda checked=False, b=help_btn, t=_contour_help:
+                    QToolTip.showText(b.mapToGlobal(
+                        b.rect().bottomLeft()), t, b, b.rect(), 10000))
+            toolbar_row.addWidget(help_btn)
+            toolbar_row.addStretch()
+            container_layout.addLayout(toolbar_row)
+
+            cw = ChartWidget()
+            container_layout.addWidget(cw, 1)
+            self.chart_widgets[axis_name] = cw
+            _add_chart('기본 분석', axis_name, container, register=False)
+
+        for name in ['X*Y Offset', 'Die Position']:
             _add_chart('기본 분석', name, ChartWidget())
 
         # Vector Map (슬라이더 컨트롤 포함)
@@ -831,8 +927,107 @@ class DataAnalyzerApp(QMainWindow):
         _add_chart('기본 분석', '↗️ Vector Map', vm_container, register=False)
 
         # 인터랙티브 (pyqtgraph)
-        for name in ['📈 트렌드', '🎯 XY Scatter', '📊 분포']:
-            _add_chart('인터랙티브', name, InteractiveChartWidget())
+        # ─── 📈 Lot 트렌드: 컨테이너 (Lot 필터 + 차트) ───
+        lot_trend_container = QWidget()
+        lt_layout = QVBoxLayout(lot_trend_container)
+        lt_layout.setContentsMargins(0, 0, 0, 0)
+        lt_layout.setSpacing(2)
+
+        # 도움말 + 필터 버튼 행
+        lt_toolbar = QHBoxLayout()
+        lt_toolbar.setContentsMargins(8, 4, 8, 0)
+
+        _lot_trend_help = (
+            "Lot 트렌드 차트 가이드\n\n"
+            "그래프 요소:\n"
+            "  🔵 파란 실선 (●) = Lot별 Mean (평균 오프셋)\n"
+            "  🟢 초록 점선 (▲) = Lot별 Max (최대값)\n"
+            "  🔴 빨강 점선 (▼) = Lot별 Min (최소값)\n"
+            "  ░░ 반투명 밴드   = Mean ± 1σ (표준편차 범위)\n"
+            "  --- 회색 점선     = Overall Mean (전체 평균)\n\n"
+            "패턴 해석:\n"
+            "  📈 우상향  = Lot 진행 시 오프셋 증가 (드리프트)\n"
+            "  📉 우하향  = 오프셋 감소 (자동 보정 의심)\n"
+            "  ➡️ 수평   = 안정적 (정상)\n"
+            "  🔀 지그재그 = 불안정 (재현성 점검 필요)\n\n"
+            "Lot 필터:\n"
+            "  • 체크 해제 → 해당 Lot 제외 후 트렌드 재계산\n"
+            "  • [이상 Lot 제외] 장비 이상 Lot를 빼고 추세 확인\n"
+            "  • [범위 지정] 처음 N개 / 마지막 N개 구간 비교")
+
+        lt_help_btn = QPushButton("?")
+        lt_help_btn.setFixedSize(22, 22)
+        lt_help_btn.setCursor(Qt.WhatsThisCursor)
+        lt_help_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {FG2};
+                          border: 1px solid #585b70; border-radius: 11px;
+                          font-size: 10pt; font-weight: bold; }}
+            QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+        """)
+        lt_help_btn.setToolTip(_lot_trend_help)
+        lt_help_btn.clicked.connect(
+            lambda checked=False, b=lt_help_btn, t=_lot_trend_help:
+                QToolTip.showText(b.mapToGlobal(
+                    b.rect().bottomLeft()), t, b, b.rect(), 10000))
+        lt_toolbar.addWidget(lt_help_btn)
+
+        lt_lbl = QLabel("🎯 Lot 필터")
+        lt_lbl.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold;")
+        lt_toolbar.addWidget(lt_lbl)
+
+        self._lot_select_all_btn = QPushButton("✅ 전체 선택")
+        self._lot_select_all_btn.setFixedHeight(22)
+        self._lot_select_all_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {FG2}; border: none;
+                          border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
+            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+        """)
+        self._lot_select_all_btn.clicked.connect(self._lot_filter_select_all)
+        lt_toolbar.addWidget(self._lot_select_all_btn)
+
+        self._lot_range_btn = QPushButton("📐 범위 지정")
+        self._lot_range_btn.setFixedHeight(22)
+        self._lot_range_btn.setToolTip(
+            "표시할 Lot 범위를 지정합니다.\n"
+            "예: 1-5 (처음 5개), -3 (마지막 3개)")
+        self._lot_range_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {ORANGE}; border: none;
+                          border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
+            QPushButton:hover {{ background: {ORANGE}; color: white; }}
+        """)
+        self._lot_range_btn.clicked.connect(self._lot_filter_range)
+        lt_toolbar.addWidget(self._lot_range_btn)
+
+        self._lot_filter_info = QLabel("")
+        self._lot_filter_info.setStyleSheet("color: #f9e2af; font-size: 8pt;")
+        lt_toolbar.addWidget(self._lot_filter_info)
+        lt_toolbar.addStretch()
+        lt_layout.addLayout(lt_toolbar)
+
+        # Lot 체크박스 컨테이너
+        self._lot_cb_container = QWidget()
+        self._lot_cb_container.setStyleSheet(f"background: {BG2}; border-radius: 4px;")
+        self._lot_cb_flow = FlowLayout(self._lot_cb_container, margin=2, spacing=4)
+        lt_layout.addWidget(self._lot_cb_container)
+
+        # 트렌드 차트 위젯
+        self._lot_trend_chart = InteractiveChartWidget()
+        lt_layout.addWidget(self._lot_trend_chart, 1)
+        self.chart_widgets['📈 Lot 트렌드'] = self._lot_trend_chart
+        _add_chart('인터랙티브', '📈 Lot 트렌드', lot_trend_container, register=False)
+
+        _add_chart('인터랙티브', '🎯 XY Scatter', InteractiveChartWidget())
+
+        # ─── 📊 분포: X/Y 서브탭 ───
+        dist_tabs = QTabWidget()
+        dist_tabs.setDocumentMode(True)
+        dist_x = InteractiveChartWidget()
+        dist_y = InteractiveChartWidget()
+        dist_tabs.addTab(dist_x, 'X')
+        dist_tabs.addTab(dist_y, 'Y')
+        self.chart_widgets['📊 분포 X'] = dist_x
+        self.chart_widgets['📊 분포 Y'] = dist_y
+        _add_chart('인터랙티브', '📊 분포', dist_tabs, register=False)
 
         # TIFF
         tiff_cw = InteractiveChartWidget()
@@ -844,7 +1039,17 @@ class DataAnalyzerApp(QMainWindow):
         # 고급 분석 (pyqtgraph — Phase 2)
         for name in ['🔍 Pareto', '🔗 Correlation']:
             _add_chart('고급 분석', name, InteractiveChartWidget())
-        _add_chart('고급 분석', '🌐 3D Surface', InteractiveChartWidget())
+
+        # ─── 🌐 3D Surface: X/Y 서브탭 ───
+        surface_tabs = QTabWidget()
+        surface_tabs.setDocumentMode(True)
+        surface_x = InteractiveChartWidget()
+        surface_y = InteractiveChartWidget()
+        surface_tabs.addTab(surface_x, 'X')
+        surface_tabs.addTab(surface_y, 'Y')
+        self.chart_widgets['🌐 3D X'] = surface_x
+        self.chart_widgets['🌐 3D Y'] = surface_y
+        _add_chart('고급 분석', '🌐 3D Surface', surface_tabs, register=False)
 
         # 비교 (matplotlib — Recipe Comparison: 3개 서브탭)
         for name in ['📊 Boxplot', '📈 Trend', '🗺️ Heatmap']:
@@ -902,51 +1107,10 @@ class DataAnalyzerApp(QMainWindow):
         self._inner_tabs['📤 Export'] = inner_export
         self.chart_category_tabs.addTab(inner_export, '📤 Export')
 
-        # Contour X/Y — add Repeat별 Contour button + 도움말 버튼
-        _contour_help = (
-            "Contour Map 색상 안내\n\n"
-            "색상은 편차의 ± 방향을 나타냅니다:\n"
-            "  🟢 초록 = 양(+) 방향 오프셋\n"
-            "  🟡 노랑 = 0 근처 (편차 없음)\n"
-            "  🔴 빨강 = 음(−) 방향 오프셋\n\n"
-            "• 색상 대비가 클수록 공간적 편향 존재\n"
-            "• 한쪽 빨강 ↔ 반대쪽 초록 = Stage Tilt\n"
-            "• 전체가 한 색으로 치우침 = Translation Offset\n\n"
-            "💡 Raw Deviation 테이블은 |절대값| 기준이므로\n"
-            "   색상이 다를 수 있습니다 (크기 vs 방향)")
-        for axis_name in ('Contour X', 'Contour Y'):
-            cw = self.chart_widgets[axis_name]
-            axis = 'X' if 'X' in axis_name else 'Y'
-            toolbar_row = QHBoxLayout()
-            toolbar_row.setContentsMargins(0, 0, 0, 0)
-            btn = QPushButton(f"🗺️ Repeat별 Contour ({axis})")
-            btn.clicked.connect(partial(self._open_repeat_contour, axis))
-            toolbar_row.addWidget(btn)
-
-            help_btn = QPushButton("?")
-            help_btn.setFixedSize(22, 22)
-            help_btn.setCursor(Qt.WhatsThisCursor)
-            help_btn.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {FG2};
-                              border: 1px solid #585b70; border-radius: 11px;
-                              font-size: 10pt; font-weight: bold; }}
-                QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
-            """)
-            help_btn.setToolTip(_contour_help)
-            help_btn.clicked.connect(
-                lambda checked=False, b=help_btn, t=_contour_help:
-                    QToolTip.showText(b.mapToGlobal(
-                        b.rect().bottomLeft()), t, b, b.rect(), 10000))
-            toolbar_row.addWidget(help_btn)
-            toolbar_row.addStretch()
-
-            toolbar_w = QWidget()
-            toolbar_w.setLayout(toolbar_row)
-            cw.layout().insertWidget(0, toolbar_w)
-
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 5)
+        splitter.setSizes([960, 960])  # 초기 5:5 비율
 
         # ─── 좌측 패널 토글 (F11 + 스플리터 더블클릭) ───
         self._main_splitter = splitter
@@ -991,7 +1155,7 @@ class DataAnalyzerApp(QMainWindow):
                 self._main_splitter.setSizes(self._saved_splitter_sizes)
             else:
                 total = sum(sizes)
-                self._main_splitter.setSizes([total * 4 // 9, total * 5 // 9])
+                self._main_splitter.setSizes([total // 2, total // 2])
 
     def eventFilter(self, obj, event):
         """스플리터 핸들 더블클릭 → 좌측 패널 토글."""
@@ -1177,10 +1341,9 @@ class DataAnalyzerApp(QMainWindow):
         for i, result in enumerate(self.recipe_results):
             data = result.get('raw_data', [])
             short = result.get('short_name', '')
-            ds = dev_spec.get(short, dev_spec.get('default',
-                 {'spec_range': 4.0, 'spec_stddev': 0.8}))
-            spec_r = ds.get('spec_range', 4.0)
-            spec_s = ds.get('spec_stddev', 0.8)
+            ds = dev_spec.get(short, {})
+            spec_r = ds.get('spec_range')
+            spec_s = ds.get('spec_stddev')
             if not data:
                 self.step_pass_states[i] = None
                 continue
@@ -1188,8 +1351,8 @@ class DataAnalyzerApp(QMainWindow):
             dy = compute_deviation_matrix(data, 'Y')
             sx = compute_statistics(filter_by_method(data, 'X'))
             sy = compute_statistics(filter_by_method(data, 'Y'))
-            px = (dx['overall_range'] <= spec_r and dx['overall_stddev'] <= spec_s) if sx['count'] > 0 else None
-            py = (dy['overall_range'] <= spec_r and dy['overall_stddev'] <= spec_s) if sy['count'] > 0 else None
+            px = (dx['overall_range'] <= spec_r and dx['overall_stddev'] <= spec_s) if (sx['count'] > 0 and spec_r is not None) else None
+            py = (dy['overall_range'] <= spec_r and dy['overall_stddev'] <= spec_s) if (sy['count'] > 0 and spec_r is not None) else None
             if px is None or py is None:
                 self.step_pass_states[i] = None
             else:
@@ -1299,10 +1462,10 @@ class DataAnalyzerApp(QMainWindow):
             self.filter_info_label.setText(f"✅ 전체 Die 분석 중 ({len(raw)}개)")
 
         self._update_cards(data, recipe)
-        self._update_die_avg_tables()    # 원본 raw_data 기반 (필터 영향 없음)
-        self._update_deviation_tables()  # 원본 raw_data 기반 (필터 영향 없음)
-        self._update_raw_table()         # 원본 raw_data 기반 (필터 영향 없음)
-        self._update_charts(data, result.get('trend', []), recipe)
+        self._update_die_avg_tables()    # self._dev_x/y 기반 → Die 필터 적용됨
+        self._update_deviation_tables()  # self._dev_x/y 기반 → Die 필터 적용됨
+        self._update_raw_table()         # self.raw_data 기반 → Die 필터 미적용 (전체 표시)
+        self._update_charts(data, result, recipe)
         self._render_die_position()
         stats = result.get('statistics', {})
         self.statusBar().showMessage(
@@ -1357,28 +1520,35 @@ class DataAnalyzerApp(QMainWindow):
 
         spec = self.settings.get('spec_limits', {})
         short = recipe.get('short_name', '')
-        sp = spec.get(short, spec.get('default',
-             {'X': {'lsl': -5000, 'usl': 5000}, 'Y': {'lsl': -5000, 'usl': 5000}}))
+        sp = spec.get(short, {})
+        if not sp:
+            self.logger.warning(f"spec_limits에 '{short}' 키 없음 → Cpk 계산 불가")
+            sp = {'X': {}, 'Y': {}}
         cpk_x = compute_cpk(s_x['mean'], s_x['stdev'],
                             sp.get('X', {}).get('lsl', -5000), sp.get('X', {}).get('usl', 5000))
         cpk_y = compute_cpk(s_y['mean'], s_y['stdev'],
                             sp.get('Y', {}).get('lsl', -5000), sp.get('Y', {}).get('usl', 5000))
 
         dev_spec = self.settings.get('spec_deviation', {})
-        ds = dev_spec.get(short, dev_spec.get('default', {'spec_range': 4.0, 'spec_stddev': 0.8}))
-        spec_r, spec_s = ds.get('spec_range', 4.0), ds.get('spec_stddev', 0.8)
+        ds = dev_spec.get(short, {})
+        if not ds:
+            self.logger.warning(f"spec_deviation에 '{short}' 키 없음 → PASS/FAIL 판정 불가")
+        spec_r = ds.get('spec_range')
+        spec_s = ds.get('spec_stddev')
 
         def _pass(st, dev):
-            if st['count'] == 0:
+            if st['count'] == 0 or spec_r is None or spec_s is None:
                 return None
             return dev['overall_range'] <= spec_r and dev['overall_stddev'] <= spec_s
 
         px = _pass(s_x, dev_x)
         py = _pass(s_y, dev_y)
         self.card_x.update_stats(s_x['mean'], dev_x['overall_range'],
-                                 dev_x['overall_stddev'], cpk_x, px)
+                                 dev_x['overall_stddev'], cpk_x, px,
+                                 spec_r=spec_r, spec_s=spec_s)
         self.card_y.update_stats(s_y['mean'], dev_y['overall_range'],
-                                 dev_y['overall_stddev'], cpk_y, py)
+                                 dev_y['overall_stddev'], cpk_y, py,
+                                 spec_r=spec_r, spec_s=spec_s)
 
         # Store pass state and refresh nav buttons (no recursion)
         idx = self.current_recipe_idx
@@ -1420,18 +1590,17 @@ class DataAnalyzerApp(QMainWindow):
                 result = recipe_results[i]
                 data = result.get('raw_data', [])
                 recipe_name = c.get('recipe', '')
-                ds = dev_spec.get(recipe_name, dev_spec.get('default',
-                     {'spec_range': 4.0, 'spec_stddev': 0.8}))
-                spec_r = ds.get('spec_range', 4.0)
-                spec_s = ds.get('spec_stddev', 0.8)
+                ds = dev_spec.get(recipe_name, {})
+                spec_r = ds.get('spec_range')
+                spec_s = ds.get('spec_stddev')
                 if data:
                     dx = compute_deviation_matrix(data, 'X')
                     dy = compute_deviation_matrix(data, 'Y')
                     sx = compute_statistics(filter_by_method(data, 'X'))
                     sy = compute_statistics(filter_by_method(data, 'Y'))
-                    if sx['count'] > 0:
+                    if sx['count'] > 0 and spec_r is not None:
                         px = dx['overall_range'] <= spec_r and dx['overall_stddev'] <= spec_s
-                    if sy['count'] > 0:
+                    if sy['count'] > 0 and spec_r is not None:
                         py = dy['overall_range'] <= spec_r and dy['overall_stddev'] <= spec_s
 
             # Pass/Fail 셀 (X, Y) — 기호만 표시
@@ -1463,14 +1632,6 @@ class DataAnalyzerApp(QMainWindow):
             item_o.setTextAlignment(Qt.AlignCenter)
             t.setItem(row, 11, item_o)
 
-            # Sparkline Trend 데이터 (Lot별 Mean)
-            trend_item = QTableWidgetItem()
-            if i < len(recipe_results):
-                trend = recipe_results[i].get('trend', [])
-                if trend:
-                    means = [t_pt.get('mean', 0) for t_pt in trend]
-                    trend_item.setData(Qt.UserRole, means)
-            t.setItem(row, 12, trend_item)
 
     def _fill_die_avg_heatmap(self, table: CopyableTable, die_stats: list):
         table.clear()
@@ -1579,23 +1740,35 @@ class DataAnalyzerApp(QMainWindow):
     # ──────────────────────────────────────────────
     # Charts — Hybrid: matplotlib + pyqtgraph
     # ──────────────────────────────────────────────
-    def _update_charts(self, data, trend, recipe):
+    def _update_charts(self, data, result, recipe):
         import matplotlib.pyplot as plt
         plt.close('all')
         short = recipe.get('short_name', '')
+        trend = result.get('trend', [])
 
         # ─── pyqtgraph 인터랙티브 차트 (GPU 가속) ───
         try:
-            self.chart_widgets['📈 트렌드'].set_widget(
-                viz_pg.create_trend_widget(trend, title=f'{short} Lot Trend'))
+            trend_x = result.get('trend_x', [])
+            trend_y = result.get('trend_y', [])
+            dev_spec = self.settings.get('spec_deviation', {})
+            ds = dev_spec.get(short, {})
+            self._update_lot_trend(trend_x, trend_y, short, ds)
         except Exception as e:
-            self.logger.error(f"트렌드 차트 오류: {e}")
+            self.logger.error(f"Lot 트렌드 차트 오류: {e}")
 
         try:
-            self.chart_widgets['📊 분포'].set_widget(
-                viz_pg.create_histogram_widget(data, title=f'{short} Distribution'))
+            x_data = [r for r in data if r.get('method') == 'X']
+            self.chart_widgets['📊 분포 X'].set_widget(
+                viz_pg.create_histogram_widget(x_data, title=f'{short} X Distribution'))
         except Exception as e:
-            self.logger.error(f"분포 차트 오류: {e}")
+            self.logger.error(f"분포 X 차트 오류: {e}")
+
+        try:
+            y_data = [r for r in data if r.get('method') == 'Y']
+            self.chart_widgets['📊 분포 Y'].set_widget(
+                viz_pg.create_histogram_widget(y_data, title=f'{short} Y Distribution'))
+        except Exception as e:
+            self.logger.error(f"분포 Y 차트 오류: {e}")
 
         try:
             self.chart_widgets['🎯 XY Scatter'].set_widget(
@@ -1623,15 +1796,16 @@ class DataAnalyzerApp(QMainWindow):
         except Exception as e:
             self.logger.error(f"Correlation 차트 오류: {e}")
 
-        # ─── 3D Surface (OpenGL) ───
-        try:
-            ds = self._dev_x.get('die_stats') or self._dev_y.get('die_stats')
-            if ds:
-                self.chart_widgets['🌐 3D Surface'].set_widget(
-                    viz_pg.create_3d_surface_widget(
-                        ds, title=f'{short} — 3D Surface'))
-        except Exception as e:
-            self.logger.error(f"3D Surface 오류: {e}")
+        # ─── 3D Surface (OpenGL) ─ X/Y 분리 ───
+        for axis_key, dev in [('X', self._dev_x), ('Y', self._dev_y)]:
+            try:
+                ds = dev.get('die_stats')
+                if ds:
+                    self.chart_widgets[f'🌐 3D {axis_key}'].set_widget(
+                        viz_pg.create_3d_surface_widget(
+                            ds, title=f'{short} — 3D {axis_key} Surface'))
+            except Exception as e:
+                self.logger.error(f"3D {axis_key} Surface 오류: {e}")
 
         # ─── matplotlib 차트 (Contour/Vector — scipy 보간) ───
         wr = self._get_wafer_radius_um()  # 웨이퍼 반경 (µm)
@@ -1736,6 +1910,138 @@ class DataAnalyzerApp(QMainWindow):
             self._die_checkboxes[first_die].setChecked(False)
         self._die_filter_updating = False
         self._on_die_filter_changed(None)
+
+    # ──────────────────────────────────────────────
+    # Lot Trend Filter (Die 필터와 독립)
+    # ──────────────────────────────────────────────
+    def _update_lot_trend(self, trend_x: list, trend_y: list,
+                          short_name: str = '', spec: dict = None):
+        """Lot 트렌드 차트 갱신 + Lot 체크박스 동적 생성."""
+        self._trend_data_x = trend_x
+        self._trend_data_y = trend_y
+        self._trend_short_name = short_name
+        self._trend_spec = spec
+
+        # Lot 체크박스 동적 생성 (X의 Lot 리스트 기준, X/Y 동일 가정)
+        lot_names = [t.get('lot_name', f'Lot{i}') for i, t in enumerate(trend_x)]
+        if not lot_names and trend_y:
+            lot_names = [t.get('lot_name', f'Lot{i}') for i, t in enumerate(trend_y)]
+
+        if set(lot_names) != set(self._lot_checkboxes.keys()):
+            self._lot_filter_updating = True
+            while self._lot_cb_flow.count():
+                item = self._lot_cb_flow.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
+            self._lot_checkboxes.clear()
+
+            for name in lot_names:
+                cb = QCheckBox(name)
+                cb.setChecked(True)
+                cb.setStyleSheet(f"""
+                    QCheckBox {{ color: {FG}; font-size: 8pt; border: none; }}
+                    QCheckBox::indicator {{ width: 12px; height: 12px; }}
+                    QCheckBox::indicator:unchecked {{ border: 1px solid #585b70;
+                        border-radius: 2px; background: {BG2}; }}
+                    QCheckBox::indicator:checked {{ border: 1px solid {ACCENT};
+                        border-radius: 2px; background: {ACCENT}; }}
+                """)
+                cb.stateChanged.connect(self._on_lot_filter_changed)
+                self._lot_cb_flow.addWidget(cb)
+                self._lot_checkboxes[name] = cb
+            self._lot_filter_updating = False
+
+        self._lot_filter_info.setText(f"✅ 전체 Lot ({len(lot_names)}개)")
+        self._render_lot_trend_chart()
+
+    def _render_lot_trend_chart(self):
+        """현재 체크 상태에 따라 Dual-Panel Lot 트렌드 차트 렌더링."""
+        checked = {n for n, cb in self._lot_checkboxes.items() if cb.isChecked()}
+
+        fx = [t for t in self._trend_data_x if t.get('lot_name', '') in checked]
+        fy = [t for t in self._trend_data_y if t.get('lot_name', '') in checked]
+
+        # re-index for continuous display
+        for i, t in enumerate(fx):
+            t['lot_index'] = i
+        for i, t in enumerate(fy):
+            t['lot_index'] = i
+
+        short = getattr(self, '_trend_short_name', '')
+        title = f'{short} Lot Trend' if short else 'Lot Trend'
+        spec = getattr(self, '_trend_spec', None)
+        self._lot_trend_chart.set_widget(
+            viz_pg.create_dual_trend_widget(fx, fy, spec=spec, title=title))
+
+        # 필터 정보 라벨
+        total = max(len(self._trend_data_x), len(self._trend_data_y))
+        shown = max(len(fx), len(fy))
+        excluded = total - shown
+        if excluded > 0:
+            self._lot_filter_info.setText(
+                f"⚠ {excluded}개 Lot 제외 → {shown}개 표시 (전체 {total}개)")
+        else:
+            self._lot_filter_info.setText(f"✅ 전체 Lot ({total}개)")
+
+    def _on_lot_filter_changed(self, state=None):
+        """개별 Lot 체크박스 변경 → 트렌드 재렌더링."""
+        if self._lot_filter_updating:
+            return
+        self._render_lot_trend_chart()
+
+    def _lot_filter_select_all(self):
+        """전체 Lot 선택 / 해제 토글."""
+        all_checked = all(cb.isChecked() for cb in self._lot_checkboxes.values())
+        self._lot_filter_updating = True
+        for cb in self._lot_checkboxes.values():
+            cb.setChecked(not all_checked)
+        self._lot_filter_updating = False
+        if not all_checked:
+            # 전체 선택 시 — 버튼 텍스트는 유지
+            pass
+        self._render_lot_trend_chart()
+
+    def _lot_filter_range(self):
+        """범위 지정 다이얼로그 — Lot 인덱스 범위로 체크박스 설정."""
+        text, ok = QInputDialog.getText(
+            self, "Lot 범위 지정",
+            "표시할 Lot 범위를 입력하세요:\n\n"
+            "  1-5     → 처음 5개 Lot\n"
+            "  -3      → 마지막 3개 Lot\n"
+            "  3-7     → 3번째 ~ 7번째 Lot\n",
+            text="1-5")
+        if not ok or not text.strip():
+            return
+
+        lot_names = list(self._lot_checkboxes.keys())
+        n = len(lot_names)
+        if n == 0:
+            return
+
+        text = text.strip()
+        try:
+            if text.startswith('-'):
+                # 마지막 N개
+                count = int(text[1:])
+                start, end = max(0, n - count), n
+            elif '-' in text:
+                parts = text.split('-')
+                start = max(0, int(parts[0]) - 1)
+                end = min(n, int(parts[1]))
+            else:
+                # 단일 숫자 → 처음 N개
+                count = int(text)
+                start, end = 0, min(n, count)
+        except ValueError:
+            QMessageBox.warning(self, "입력 오류",
+                                "올바른 형식으로 입력하세요.\n예: 1-5, -3, 3-7")
+            return
+
+        self._lot_filter_updating = True
+        for i, (name, cb) in enumerate(self._lot_checkboxes.items()):
+            cb.setChecked(start <= i < end)
+        self._lot_filter_updating = False
+        self._render_lot_trend_chart()
 
     def _on_vector_scale_changed(self, value):
         """화살표 배율 슬라이더 변경 시 Vector Map 재렌더링."""
@@ -2066,9 +2372,63 @@ class DataAnalyzerApp(QMainWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def _open_spec_config(self):
-        QMessageBox.information(self, "Spec",
-            "settings.json 의 spec_limits / spec_deviation 섹션을 직접 수정하세요.\n\n"
-            f"파일 위치:\n{os.path.join(os.path.dirname(__file__), 'settings.json')}")
+        from PySide6.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QDialogButtonBox
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("⚙️ Spec 설정 현황")
+        dlg.setMinimumSize(600, 480)
+        dlg.setStyleSheet(f"background: {BG}; color: {FG};")
+        layout = QVBoxLayout(dlg)
+
+        # spec_deviation 테이블
+        lbl_dev = QLabel("📊 Deviation Spec (판정 기준)")
+        lbl_dev.setStyleSheet(f"font-size: 11pt; font-weight: bold; color: {ACCENT};")
+        layout.addWidget(lbl_dev)
+
+        dev_spec = self.settings.get('spec_deviation', {})
+        t_dev = QTableWidget(len(dev_spec), 3)
+        t_dev.setHorizontalHeaderLabels(['Recipe', 'Range (µm)', 'StdDev (µm)'])
+        t_dev.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t_dev.setEditTriggers(QTableWidget.NoEditTriggers)
+        for row, (name, ds) in enumerate(dev_spec.items()):
+            t_dev.setItem(row, 0, QTableWidgetItem(name))
+            t_dev.setItem(row, 1, QTableWidgetItem(str(ds.get('spec_range', '—'))))
+            t_dev.setItem(row, 2, QTableWidgetItem(str(ds.get('spec_stddev', '—'))))
+        t_dev.resizeRowsToContents()
+        layout.addWidget(t_dev)
+
+        # spec_limits 테이블
+        lbl_lim = QLabel("📌 Offset Limits (Cpk 기준)")
+        lbl_lim.setStyleSheet(f"font-size: 11pt; font-weight: bold; color: {ACCENT}; margin-top: 8px;")
+        layout.addWidget(lbl_lim)
+
+        spec_lim = self.settings.get('spec_limits', {})
+        t_lim = QTableWidget(len(spec_lim), 5)
+        t_lim.setHorizontalHeaderLabels(['Recipe', 'X LSL (nm)', 'X USL (nm)', 'Y LSL (nm)', 'Y USL (nm)'])
+        t_lim.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        t_lim.setEditTriggers(QTableWidget.NoEditTriggers)
+        for row, (name, sp) in enumerate(spec_lim.items()):
+            t_lim.setItem(row, 0, QTableWidgetItem(name))
+            x = sp.get('X', {})
+            y = sp.get('Y', {})
+            t_lim.setItem(row, 1, QTableWidgetItem(str(x.get('lsl', '—'))))
+            t_lim.setItem(row, 2, QTableWidgetItem(str(x.get('usl', '—'))))
+            t_lim.setItem(row, 3, QTableWidgetItem(str(y.get('lsl', '—'))))
+            t_lim.setItem(row, 4, QTableWidgetItem(str(y.get('usl', '—'))))
+        t_lim.resizeRowsToContents()
+        layout.addWidget(t_lim)
+
+        # 파일 경로 안내
+        path = os.path.join(os.path.dirname(__file__), 'settings.json')
+        lbl_path = QLabel(f"📁 {path}")
+        lbl_path.setStyleSheet(f"color: {FG2}; font-size: 8pt; margin-top: 8px;")
+        lbl_path.setWordWrap(True)
+        layout.addWidget(lbl_path)
+
+        btn = QDialogButtonBox(QDialogButtonBox.Ok)
+        btn.accepted.connect(dlg.accept)
+        layout.addWidget(btn)
+        dlg.exec()
 
 
 def main():

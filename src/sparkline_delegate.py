@@ -1,43 +1,49 @@
 """
-sparkline_delegate.py — Summary 테이블 Sparkline 렌더링
+sparkline_delegate.py — Summary 테이블 Spec 게이지 바 렌더링
 
-QPainter로 셀 내 미니 트렌드 차트를 그립니다.
-- SparklineTrendDelegate: Lot별 Mean 값의 미니 라인 차트
+QPainter로 셀 내 Spec 대비 사용률 게이지를 그립니다.
+- SpecGaugeDelegate: Range/spec 비율을 수평 바로 표시
+  0~80% 초록, 80~100% 노랑, 100%+ 빨강
 """
 
 from PySide6.QtWidgets import QStyledItemDelegate
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
+from PySide6.QtGui import QPainter, QPen, QColor, QFont
 
 # Catppuccin 색상
 ACCENT = QColor('#89b4fa')
 GREEN = QColor('#a6e3a1')
+YELLOW = QColor('#f9e2af')
 RED = QColor('#f38ba8')
 BG3 = QColor('#45475a')
+BG4 = QColor('#313244')
+FG = QColor('#cdd6f4')
 FG2 = QColor('#a6adc8')
 
 
-class SparklineTrendDelegate(QStyledItemDelegate):
-    """Lot별 Mean 트렌드를 미니 라인 차트로 렌더링.
+class SpecGaugeDelegate(QStyledItemDelegate):
+    """Spec 대비 사용률 게이지 바.
 
-    데이터는 Qt.UserRole에 [float, ...] 리스트로 저장합니다.
+    데이터는 Qt.UserRole에:
+      {'range_pct': float, 'std_pct': float}  (퍼센트 비율, 100 = Spec 경계)
     """
 
     def paint(self, painter: QPainter, option, index):
-        # 배경 그리기
-        super().paint(painter, option, index)
+        # 배경
+        painter.fillRect(option.rect, QColor(BG4))
 
-        data = index.data(Qt.UserRole)
-        if not data or not isinstance(data, list) or len(data) < 2:
-            # 데이터 없으면 '—' 표시
+        raw = index.data(Qt.UserRole)
+        if not raw or not isinstance(raw, dict):
             painter.setPen(QPen(FG2))
             painter.drawText(option.rect, Qt.AlignCenter, '—')
             return
 
+        range_pct = raw.get('range_pct', 0)
+        std_pct = raw.get('std_pct', 0)
+
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # 그리기 영역 (패딩 적용)
         rect = option.rect.adjusted(4, 3, -4, -3)
         w = rect.width()
         h = rect.height()
@@ -46,56 +52,68 @@ class SparklineTrendDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # 값 범위 계산
-        min_val = min(data)
-        max_val = max(data)
-        val_range = max_val - min_val
-        if val_range == 0:
-            val_range = 1.0  # 평탄한 경우
+        bar_h = max(h * 0.32, 4)
+        gap = max(2, (h - bar_h * 2) / 3)
 
-        n = len(data)
-        step_x = w / (n - 1) if n > 1 else w
+        # 두 개의 바: Range, StdDev
+        bars = [
+            ('R', range_pct),
+            ('σ', std_pct),
+        ]
 
-        # 포인트 계산 (Y축 반전: 위가 큰 값)
-        points = []
-        for i, val in enumerate(data):
-            x = rect.x() + i * step_x
-            y = rect.y() + h - ((val - min_val) / val_range) * h
-            points.append((x, y))
+        for idx, (label, pct) in enumerate(bars):
+            y_top = rect.y() + gap + idx * (bar_h + gap)
 
-        # 그래디언트 영역 (반투명 채우기)
-        fill_path = QPainterPath()
-        fill_path.moveTo(points[0][0], rect.y() + h)
-        for x, y in points:
-            fill_path.lineTo(x, y)
-        fill_path.lineTo(points[-1][0], rect.y() + h)
-        fill_path.closeSubpath()
+            # 배경 트랙
+            track = QRectF(rect.x() + 12, y_top, w - 12, bar_h)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(BG3))
+            painter.drawRoundedRect(track, 2, 2)
 
-        fill_color = QColor(ACCENT)
-        fill_color.setAlpha(40)
-        painter.fillPath(fill_path, fill_color)
+            # 게이지 바 (최대 150%까지 표시, 그 이상은 클램프)
+            fill_ratio = min(pct / 100.0, 1.5)
+            fill_w = max(track.width() * fill_ratio / 1.5, 1)
 
-        # 트렌드 라인
-        line_path = QPainterPath()
-        line_path.moveTo(points[0][0], points[0][1])
-        for x, y in points[1:]:
-            line_path.lineTo(x, y)
+            # 색상: 0~80% 초록, 80~100% 노랑, 100%+ 빨강
+            if pct <= 80:
+                bar_color = GREEN
+            elif pct <= 100:
+                bar_color = YELLOW
+            else:
+                bar_color = RED
 
-        pen = QPen(ACCENT, 1.5)
-        pen.setCapStyle(Qt.RoundCap)
-        painter.setPen(pen)
-        painter.drawPath(line_path)
+            bar_rect = QRectF(track.x(), y_top, fill_w, bar_h)
+            painter.setBrush(bar_color)
+            painter.drawRoundedRect(bar_rect, 2, 2)
 
-        # 마지막 포인트 강조 (현재 값)
-        last_x, last_y = points[-1]
-        painter.setBrush(ACCENT)
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(QRectF(last_x - 2, last_y - 2, 4, 4))
+            # 라벨 (R, σ)
+            painter.setPen(QPen(FG2))
+            painter.setFont(QFont("Segoe UI", 6))
+            painter.drawText(
+                QRectF(rect.x(), y_top, 11, bar_h),
+                Qt.AlignVCenter | Qt.AlignLeft, label)
+
+            # 퍼센트 텍스트 (바 오른쪽)
+            pct_text = f"{pct:.0f}%"
+            painter.setPen(QPen(bar_color))
+            painter.setFont(QFont("Segoe UI", 6, QFont.Bold))
+            text_x = track.x() + fill_w + 2
+            remaining = track.right() - text_x
+            if remaining > 20:
+                painter.drawText(
+                    QRectF(text_x, y_top, remaining, bar_h),
+                    Qt.AlignVCenter | Qt.AlignLeft, pct_text)
+            else:
+                # 바 안에 표기
+                painter.setPen(QPen(QColor(BG4)))
+                painter.drawText(
+                    QRectF(track.x(), y_top, fill_w - 2, bar_h),
+                    Qt.AlignVCenter | Qt.AlignRight, pct_text)
 
         painter.restore()
 
     def sizeHint(self, option, index):
         hint = super().sizeHint(option, index)
-        hint.setWidth(max(hint.width(), 80))
-        hint.setHeight(max(hint.height(), 24))
+        hint.setWidth(max(hint.width(), 100))
+        hint.setHeight(max(hint.height(), 28))
         return hint

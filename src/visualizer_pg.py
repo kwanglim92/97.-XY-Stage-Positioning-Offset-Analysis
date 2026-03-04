@@ -194,6 +194,101 @@ def create_trend_widget(trend_data: list, title: str = 'Lot Trend') -> CrossHair
     return w
 
 
+def create_dual_trend_widget(x_trend: list, y_trend: list,
+                              spec: dict = None,
+                              title: str = 'Lot Trend') -> QWidget:
+    """X/Y Dual-Panel Lot Trend — Mean ± 1σ 밴드 (Min/Max 제거).
+
+    Args:
+        x_trend: compute_trend(x_filtered) 결과
+        y_trend: compute_trend(y_filtered) 결과
+        spec: {'spec_range': 4.0, 'spec_stddev': 0.8} — Spec 한계선용
+        title: 차트 제목
+    """
+    from PySide6.QtWidgets import QVBoxLayout
+
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(2)
+
+    def _make_panel(trend_data, axis_label, color):
+        """단일 축 트렌드 패널 생성."""
+        w = CrossHairPlotWidget()
+        plot = w.plotItem
+        _style_axis(plot, title=f'{title} — {axis_label}',
+                    x_label='Lot Index', y_label=f'{axis_label} Offset (nm)')
+
+        if not trend_data:
+            return w
+
+        indices = np.array([t['lot_index'] for t in trend_data], dtype=float)
+        means = np.array([t['mean'] for t in trend_data])
+        stdevs = np.array([t['stdev'] for t in trend_data])
+        labels = [t['lot_name'] for t in trend_data]
+
+        # ±1σ 밴드
+        upper = means + stdevs
+        lower = means - stdevs
+        fill_upper = pg.PlotCurveItem(indices, upper, pen=pg.mkPen(None))
+        fill_lower = pg.PlotCurveItem(indices, lower, pen=pg.mkPen(None))
+        fill = pg.FillBetweenItem(fill_upper, fill_lower,
+                                   brush=pg.mkBrush(color + '25'))
+        w.addItem(fill_upper)
+        w.addItem(fill_lower)
+        w.addItem(fill)
+
+        # Mean line
+        w.plot(indices, means, pen=_make_pen(color, 2),
+               symbol='o', symbolBrush=color, symbolSize=7,
+               name=f'{axis_label} Mean')
+
+        # Overall Mean
+        overall_mean = float(np.mean(means))
+        w.addItem(pg.InfiniteLine(
+            pos=overall_mean, angle=0,
+            pen=_make_pen('#888888', 1, 'dash'),
+            label=f'Overall: {overall_mean:.1f}',
+            labelOpts={'color': FG2, 'position': 0.05}))
+
+        # Spec 한계선
+        if spec:
+            spec_range = spec.get('spec_range')
+            if spec_range:
+                half = spec_range * 1000 / 2  # µm → nm
+                for sign, lbl in [(1, f'+{spec_range/2:.1f}µm'),
+                                   (-1, f'-{spec_range/2:.1f}µm')]:
+                    pos = overall_mean + sign * half
+                    w.addItem(pg.InfiniteLine(
+                        pos=pos, angle=0,
+                        pen=_make_pen(RED, 1.5, 'dash'),
+                        label=lbl,
+                        labelOpts={'color': RED, 'position': 0.95}))
+
+        # Legend
+        plot.addLegend(offset=(10, 10), labelTextColor=FG2,
+                       brush=pg.mkBrush(BG3 + 'CC'))
+
+        # X축 틱 라벨
+        ticks = [(int(idx), lbl) for idx, lbl in zip(indices, labels)]
+        plot.getAxis('bottom').setTicks([ticks])
+
+        # CrossHair 데이터
+        pts = [(float(idx), float(m), lbl)
+               for idx, m, lbl in zip(indices, means, labels)]
+        w.set_data_points(pts)
+
+        plot.enableAutoRange()
+        return w
+
+    # X 패널 (상단) — 파란색
+    layout.addWidget(_make_panel(x_trend, 'X', ACCENT), 1)
+    # Y 패널 (하단) — 빨간색
+    layout.addWidget(_make_panel(y_trend, 'Y', RED), 1)
+
+    return container
+
+
 # ═══════════════════════════════════════════════
 #  2. XY Scatter (Die별 색상 + Hover 정보)
 # ═══════════════════════════════════════════════
