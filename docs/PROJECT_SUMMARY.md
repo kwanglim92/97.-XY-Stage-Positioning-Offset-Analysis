@@ -1,8 +1,8 @@
 # 📊 XY Stage Positioning Offset Analysis Tool
 
 > **프로젝트**: XY Stage Offset 분석 도구 (PySide6)  
-> **버전**: v9.0  
-> **최종 업데이트**: 2026-03-04  
+> **버전**: v9.5  
+> **최종 업데이트**: 2026-03-06  
 > **플랫폼**: Windows / Python 3.11+  
 
 ---
@@ -111,21 +111,26 @@ QTableWidget { gridline-color: BG3; selection-background-color: #45475a; }
 ```
 97. XY Stage Positioning Offset Analysis/
 ├── src/
-│   ├── main.py              # GUI 메인 (DataAnalyzerApp, ~2400행)
-│   ├── csv_loader.py        # Lot 폴더 스캔, CSV/TXT 배치 로드
-│   ├── recipe_scanner.py    # Recipe 디렉토리 구조 자동 탐지 + 트렌드 계산
-│   ├── analyzer.py          # 통계, Cpk, Deviation Matrix, Affine Transform
-│   ├── visualizer.py        # Matplotlib 차트 (Contour, Vector, Scatter 등)
-│   ├── visualizer_pg.py     # pyqtgraph 인터랙티브 차트 (Trend, 분포, 3D)
+│   ├── main.py               # GUI 메인 (DataAnalyzerApp + GuideDialog, ~3000행)
+│   ├── csv_loader.py         # Lot 폴더 스캔, CSV/TXT 배치 로드
+│   ├── recipe_scanner.py     # Recipe 디렉토리 구조 자동 탐지 + 트렌드 계산
+│   ├── analyzer.py           # 통계, Cpk, Deviation Matrix, Affine Transform
+│   ├── visualizer.py         # Matplotlib 차트 (Contour, Vector, Scatter 등)
+│   ├── visualizer_pg.py      # pyqtgraph 인터랙티브 차트 (Trend, 분포, 3D)
 │   ├── sparkline_delegate.py # QPainter 기반 커스텀 셀 렌더링
-│   ├── exporter.py          # CSV/Excel 내보내기
-│   ├── pdf_generator.py     # PDF 리포트 생성
-│   ├── tiff_loader.py       # PSPylib TIFF 바이너리 파서
-│   ├── settings.py          # 설정 로드/저장 유틸리티
-│   └── settings.json        # 사용자 설정 (Spec, 창 위치 등)
-├── data/                    # 측정 데이터 (Recipe별 폴더 구조)
-├── docs/                    # 가이드 문서
-└── PROJECT_SUMMARY.md       # 이 문서
+│   ├── exporter.py           # CSV/Excel 내보내기
+│   ├── pdf_generator.py      # PDF 리포트 생성
+│   ├── tiff_loader.py        # PSPylib TIFF 바이너리 파서
+│   ├── settings.py           # 설정 로드/저장 유틸리티
+│   └── settings.json         # 사용자 설정 (Spec, 창 위치 등)
+├── data/                     # 측정 데이터 (Recipe별 폴더 구조)
+├── docs/
+│   ├── PROJECT_SUMMARY.md    # 이 문서
+│   ├── TECH_STACK.md         # 기술 스택 정의
+│   ├── ARCHITECTURE.md       # 아키텍처 참조 (모듈 의존 관계, UI 레이아웃 트리)
+│   ├── DATA_ANALYSIS_GUIDE.md # 엔지니어용 분석 가이드
+│   └── SUMMARY_TABLE_GUIDE.md # Summary 테이블 컬럼 가이드
+└── PROJECT_SUMMARY.md        # 루트 레퍼런스 (이 문서의 원본)
 ```
 
 ---
@@ -166,43 +171,45 @@ QTableWidget { gridline-color: BG3; selection-background-color: #45475a; }
 
 **레이아웃 구조 (QSplitter 5:5):**
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ [📁 폴더] [찾아보기] [🔄 스캔 & 분석]      [Wafer: 300mm] │
-├─────────────────────────────────────────────────────────────┤
-│ Workflow: [Step 1 ▶ Step 2 ▶ Step 3 ▶ Step 4]              │
-├──────────────────────┬──────────────────────────────────────┤
-│ Step: 1. Vision Pat. │ 기본 분석 | 인터랙티브 | 고급 분석 | │
-│                      │ 비교 | Export                        │
-│ ┌─X Offset──────────┐│                                      │
-│ │ Avg: 2736.439     ││        (차트 영역)                    │
-│ │ Range: 1.313 /1.0 ▲││  Contour X/Y | XY Scatter |         │
-│ │ StdDev: 0.253/0.2 ▲││  Vector Map | Die Position |        │
-│ │ Cpk: 2.98         ││  Lot Trend | 분포 | 3D Surface |     │
-│ │ ❌ FAIL            ││  TIFF                                │
-│ └───────────────────┘│                                      │
-│ ┌─Y Offset──────────┐│                                      │
-│ │ (동일 구조)        ││                                      │
-│ └───────────────────┘│                                      │
-│ ⚙️ Spec 설정         │                                      │
-│──────────────────────│                                      │
-│ 📝 시스템 로그        │                                      │
-│ 🗄️ 데이터 테이블      │                                      │
-│  ├ Summary           │                                      │
-│  ├ Die별 평균 (X/Y)   │                                      │
-│  ├ Raw Deviation     │                                      │
-│  └ 원본 데이터       │                                      │
-│──────────────────────│                                      │
-│ Die 필터 (체크박스)   │                                      │
-└──────────────────────┴──────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│ [📁 폴더] [Open] [🔄 Scan & Analysis]        [Wafer: 300mm]  │
+├───────────────────────────────────────────────────────────────┤
+│ Workflow: [Step 1 ▶ Step 2 ▶ Step 3 ▶ Step 4]                │
+├────────────────────────┬──────────────────────────────────────┤
+│ Step: 1. Vision Pat.   │ 기본 분석 | 인터랙티브 | 고급 분석 │
+│                        │ 비교 | Export                       │
+│ ┌─X Offset────────────┐│                                      │
+│ │ Avg: 2736.439       ││       (차트 영역)                    │
+│ │ Range: 1.313 /1.0 ▲ ││  Contour X/Y | XY Scatter |         │
+│ │ StdDev: 0.253/0.2 ▲ ││  Vector Map | Die Position |        │
+│ │ Cpk: 2.98           ││  Lot Trend | 분포 | 3D Surface |     │
+│ │ ❌ FAIL              ││  TIFF                                │
+│ └─────────────────────┘│                                      │
+│ ┌─Y Offset────────────┐│                                      │
+│ │ (동일 구조)          ││                                      │
+│ └─────────────────────┘│                                      │
+│ ⚙️ Spec 설정           │                                      │
+│────────────────────────│                                      │
+│ 📝 시스템 로그          │                                      │
+│ 🗄️ 데이터 테이블        │                                      │
+│  ├ Summary             │                                      │
+│  ├ Die별 평균 (X/Y)     │                                      │
+│  ├ Raw Deviation       │                                      │
+│  └ 원본 데이터         │                                      │
+│────────────────────────│                                      │
+│ Die 필터 (토글+체크박스) │                                      │
+└────────────────────────┴──────────────────────────────────────┘
 ```
 
-**주요 UI 패턴:**
-- **StatCard**: X/Y 카드에 Spec 대비 표기 (`value / spec ▲+N%` or `✓N%`)
+**주요 UI 패턴 (v9.5 기준):**
+- **StatCard**: X/Y 카드에 Spec 대비 표기 (`value / spec ▲+N%` or `✓N%`), 테두리(border) 포함
 - **히트맵 테이블**: Die Average — 양방향 Red-Blue / StdDev·Range — Steel Blue
+- **테이블 전체 가운데 정렬**: Summary, Die별 평균, Raw Deviation 모든 데이터 셀 `AlignCenter`
 - **Luminance 기반 텍스트 반전**: 배경 밝기에 따라 흰/검 자동 계산
 - **드래그 선택 & Ctrl+C 복사**: `CopyableTable` 위젯
-- **Sub-Tab 패턴**: '📊 분포', '🌐 3D Surface' — X/Y 서브탭 내장
+- **Sub-Tab 패턴**: '분포', '3D Surface' — X/Y 서브탭 내장
 - **Spec 설정 다이얼로그**: Deviation Spec + Offset Limits 표 형태로 표시
+- **GuideDialog**: 📖 분석 가이드 보기 팝업 — QSplitter(좌: 목차 QListWidget / 우: QTextBrowser), HTML 렌더링
 
 ---
 
@@ -212,6 +219,9 @@ QTableWidget { gridline-color: BG3; selection-background-color: #45475a; }
 📁 Root 폴더 선택
     ↓
 recipe_scanner: Recipe 구조 자동 탐지 (Step 번호, 이름, Round)
+    ↓
+[v9.5] 폴더명 검증: short_name ↔ spec_deviation 키 대조 (엄격 일치)
+    → 불일치 시 QMessageBox.critical 표시 후 스캔 차단
     ↓
 csv_loader: Lot별 CSV/TXT 배치 로드 → records[] (method='X'/'Y')
     ↓
@@ -365,6 +375,19 @@ pip install PySide6 numpy pandas scipy matplotlib openpyxl pyqtgraph PyOpenGL
 | 9.1 | pyqtgraph 인터랙티브 차트 (Lot Trend, 분포, 3D) | ✅ |
 | 9.2 | X/Y 분리 아키텍처 (독립 축별 드리프트 감지) | ✅ |
 | 9.3 | Spec 대비 카드 표기 + Spec 다이얼로그 + 하드코딩 제거 | ✅ |
+| **9.4** | Die 필터 토글 + XY Scatter 범례 패널 + Log Scale + Lot 필터 체크박스 트렌드 | ✅ |
+| **9.5** | **엄격 폴더명 검증** + 테이블 전역 가운데 정렬 + **GuideDialog** (5섹션 엔지니어 분석 가이드) + logger.warn 버그 수정 + UI 버튼명 영문화 | ✅ |
+
+---
+
+## 12. 관련 문서
+
+| 문서 | 위치 | 설명 |
+|------|------|------|
+| [TECH_STACK.md](./TECH_STACK.md) | docs/ | 기술 스택 전체 정의 (의존성, 색상 팔레트, 알고리즘 목록) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | docs/ | 모듈 의존 관계, 데이터 흐름, UI 레이아웃 트리 |
+| [DATA_ANALYSIS_GUIDE.md](./DATA_ANALYSIS_GUIDE.md) | docs/ | 엔지니어용 분석 가이드 (지표 해석, 패턴 진단표) |
+| [SUMMARY_TABLE_GUIDE.md](./SUMMARY_TABLE_GUIDE.md) | docs/ | Summary 테이블 컬럼별 상세 설명 |
 
 ---
 

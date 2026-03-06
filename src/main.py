@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox, QInputDialog,
     QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
+    QListWidget, QTextBrowser, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
@@ -511,6 +512,204 @@ def _contrast_fg(bg: QColor) -> QColor:
 
 
 # ═══════════════════════════════════════════════
+#  도움말 다이얼로그 (GuideDialog)
+# ═══════════════════════════════════════════════
+class GuideDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📖 데이터 분석 가이드 (도움말)")
+        self.resize(1000, 700)
+        self.setStyleSheet(f"background: {BG}; color: {FG}; font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left Panel (List)
+        self.nav_list = QListWidget()
+        self.nav_list.setStyleSheet(f"""
+            QListWidget {{ background: {BG2}; border: 1px solid {BG3}; border-radius: 6px; outline: none; }}
+            QListWidget::item {{ padding: 14px 10px; border-bottom: 1px solid {BG3}; border-radius: 4px; margin: 2px; }}
+            QListWidget::item:selected {{ background: {ACCENT}; color: {BG}; font-weight: bold; }}
+            QListWidget::item:hover:!selected {{ background: {BG3}; }}
+        """)
+        self.nav_list.setCursor(Qt.PointingHandCursor)
+        
+        # Guide Contents
+        self.contents = {
+            "1. \ub370\uc774\ud130 \ud14c\uc774\ube14 & \uc9c0\ud45c \ud574\uc11d": (
+                "<h2>\ud83d\udcca 1. \ub370\uc774\ud130 \ud14c\uc774\ube14 & \uae30\ucd08 \ud1b5\uacc4 \uc9c0\ud45c \ud574\uc11d</h2>"
+                "<p>XY Stage Positioning \ubd84\uc11d\uc758 \ucd9c\ubc1c\uc810\uc740 <b>\ud1b5\uacc4 \uc9c0\ud45c\uac00 \uc758\ubbf8\ud558\ub294 \uc7a5\ube44 \uc0c1\ud0dc\ub97c \uc815\ud655\ud788 \ud30c\uc545</b>\ud558\ub294 \uac83\uc785\ub2c8\ub2e4. \uac01 \uc9c0\ud45c\ub294 \uc11c\ub85c \ub3c5\ub9bd\uc801\uc73c\ub85c \ubcf4\uc9c0 \uc54a\uace0, <b>\uc870\ud569\ud574\uc11c \ud574\uc11d</b>\ud560 \ub54c \uac00\uc7a5 \uc720\ud6a8\ud569\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\uc9c0\ud45c</th><th>\uc218\uc2dd / \uc815\uc758</th><th>\uc5d4\uc9c0\ub2c8\uc5b4 \ud574\uc11d \ud3ec\uc778\ud2b8</th></tr>"
+                "<tr><td><b>Mean (\ud3c9\uade0)</b></td><td>\u03a3x / n</td><td>\uc2a4\ud14c\uc774\uc9c0\uc758 <b>\uacc4\ud1b5 \uc624\ucc28(Systematic Error)</b>\ub97c \ub098\ud0c0\ub0c4. 0\uc5d0\uc11c \ubc97\uc5b4\ub0a0\uc218\ub85d \uae30\uacc4\uc801 \uc624\ud504\uc14b(Offset)\uc774\ub098 \uce98\ub9ac\ube0c\ub808\uc774\uc158 \uc624\ub958 \uc758\uc2ec. X Mean \u2260 0\uc774\uba74 X\ucd95 \uc2a4\ud14c\uc774\uc9c0\uc758 \uc601\uc810\uc774 \ud2c0\uc5b4\uc9c4 \uac83.</td></tr>"
+                "<tr><td><b>StdDev (\ud45c\uc900\ud3b8\ucc28, \u03c3)</b></td><td>\u221a(\u03a3(x-\u03bc)\u00b2 / n)</td><td>\uce21\uc815 <b>\uc7ac\ud604\uc131(Repeatability)</b>\uc758 \uc9c0\ud45c. \ub3d9\uc77c \uc870\uac74\uc5d0\uc11c \ubc18\ubcf5 \uce21\uc815\ud588\uc744 \ub54c \uac12\uc774 \ud758\uc5b4\uc9c0\ub294 \uc815\ub3c4. \u03c3\uac00 \ud06c\uba74 \uc2a4\ud14c\uc774\uc9c0 \uc9c4\ub3d9, \uc778\ucf54\ub354 \ub178\uc774\uc988, \uae30\uacc4\uc801 \uc720\uaca9(Backlash) \ub4f1\uc744 \uc758\uc2ec.</td></tr>"
+                "<tr><td><b>Range (\ubc94\uc704)</b></td><td>Max \u2212 Min</td><td>Single Outlier\uc5d0\ub3c4 \ubbfc\uac10\ud558\uac8c \ubc18\uc751. Outlier \uc81c\uac70 \ud6c4\uc5d0\ub3c4 Range\uac00 \ud06c\uc9c0 \ud568\uaed8 \ud655\uc778\ud574\uc57c \ud568. Out \uc9c0\ud45c\uc640 \uad50\ucc28 \ubd84\uc11d \ud544\uc218.</td></tr>"
+                "<tr><td><b>CV% (\ubcc0\ub3d9\uacc4\uc218)</b></td><td>(\u03c3 / |\u03bc|) \u00d7 100</td><td>Mean\uc774 0\uc5d0 \uac00\uae4c\uc6b8 \ub54c CV%\ub294 \ub9e4\uc6b0 \ubbfc\uac10\ud558\uac8c \ubc18\uc751\ud558\ubbc0\ub85c, Mean\uc774 \uadf9\uc18c\uac12\uc77c \ub54c \ub2e8\ub3c5 \ud574\uc11d\uc5d0 \uc8fc\uc758.</td></tr>"
+                "<tr><td><b>Out (\uc774\uc0c1\uce58 \uc218)</b></td><td>IQR \uae30\uc900 \ud0d0\uc9c0</td><td>Q1 \u2212 1.5\u00d7IQR ~ Q3 + 1.5\u00d7IQR \ubc16\uc758 \ub370\uc774\ud130 \uc218. Out &gt; 0\uc774\uba74 \ud2b9\uc815 Lot/\uc2dc\uc810\uc5d0 \uad6d\uc18c\uc801 \uc774\ubca4\ud2b8(\uae30\uacc4 \ucda9\uaca9, \uc9c4\ub3d9, \ucca5 \uc624\ub958 \ub4f1)\uac00 \ubc1c\uc0dd\ud588\uc74c\uc744 \uc2dc\uc0ac.</td></tr>"
+                "<tr><td><b>Cpk (\uacf5\uc815\ub2a5\ub825\uc9c0\uc218)</b></td><td>min[(USL\u2212\u03bc)/3\u03c3, (\u03bc\u2212LSL)/3\u03c3]</td><td><b>1.33 \uc774\uc0c1\uc774 \ud569\uaca9 \uae30\uc900</b>(4\u03c3). Cpk\uac00 \ub099\uc740\ub370 \u03c3\uac00 \uc791\ub2e4\uba74 Mean\uc774 \uaddc\uaca9 \uc911\uc2ec\uc5d0\uc11c \uce58\uc6b0\uccd0\uc788\ub294 \uac83\uc73c\ub85c \uc601\uc810 \uc7ac\uc870\uc815 \ud544\uc694.</td></tr>"
+                "</table>"
+                "<h3>\ud3ec\ud569 \ud574\uc11d \uc0ac\ub840</h3>"
+                "<table>"
+                "<tr><th>\uc0c1\ud669</th><th>\uc5d4\uc9c0\ub2c8\uc5b4 \ud574\uc11d \ubc0f \uc870\uce58</th></tr>"
+                "<tr><td>Mean \uc791\uc74c + \u03c3 \ud07c\uc74c</td><td>\ud3c9\uade0 \uc704\uce58\ub294 \ub9de\uc9c0\ub9cc <b>\uc7ac\ud604\uc131\uc774 \ub098\uc05c \uc0c1\ud0dc</b> \u2192 \uc2a4\ud14c\uc774\uc9c0 \uc9c4\ub3d9 \ub610\ub294 \uc778\ucf54\ub354 \ub178\uc774\uc988 \uc870\uc0ac</td></tr>"
+                "<tr><td>\u03c3 \uc791\uc74c + Mean \ud06c\uc74c</td><td>\uc815\ubc00\ud558\uc9c0\ub9cc <b>\uc815\ud655\ud558\uc9c0 \uc54a\uc74c(Accurate but not precise)</b> \u2192 \uc624\ud504\uc14b \ubcf4\uc815(Calibration) \ud544\uc694</td></tr>"
+                "<tr><td>\u03c3, Mean \ub458 \ub2e4 \ub098\uc05c \uacbd\uc6b0</td><td>\uadfc\ubcf8\uc801\uc778 <b>\uc2a4\ud14c\uc774\uc9c0 \uc815\ub82c \uc2e4\ud328</b> \uac80\ud1a0 \ud544\uc694</td></tr>"
+                "</table>"
+            ),
+            "2. Die & Raw \ubd84\uc0b0 \ud14c\uc774\ube14": (
+                "<h2>\ud83d\udd22 2. Die\ubcc4 \ud3c9\uade0 & Raw Deviation \ubd84\uc11d</h2>"
+                "<h3>Die\ubcc4 \ud3c9\uade0 (Die Average Heatmap)</h3>"
+                "<p>Wafer \uc804\uba74\uc744 \uaca9\uc790\ub85c \ubd84\ud560\ud55c <b>\uac01 Die \uc704\uce58\uc5d0\uc11c\uc758 \ud3c9\uade0 \uc624\ucc28</b>\uc785\ub2c8\ub2e4. \uc0c9\uc0c1 \ud788\ud2b8\ub9f5\uc73c\ub85c \ud45c\ud604\ub418\uc5b4 \uacf5\uac04\uc801 \ud328\ud134\uc744 \uc9c1\uad00\uc801\uc73c\ub85c \ud30c\uc545\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\uad00\uc2ec \ud328\ud134</th><th>\uc2dc\uac01\uc801 \ud2b9\uc9d5</th><th>\uac00\ub2a5\ud55c \uc6d0\uc778</th></tr>"
+                "<tr><td><b>Edge Effect</b></td><td>Wafer \uac00\uc7a5\uc790\ub9ac Die\ub9cc \ubd89\uac70\ub098 \ud30c\ub78c\uc0c9</td><td>\ucca5(Chuck) Edge \ud640\ub529 \ubd88\uade0\uc77c, \uc9c4\uacf5 \ud765\ucc29 \ubd88\ub7c9, \uac00\uc7a5\uc790\ub9ac \ub178\uad11(Exposure) \ud3b8\ucc28</td></tr>"
+                "<tr><td><b>\ub300\uac01\uc120 \ud3b8\ucc28</b></td><td>\ud2b9\uc815 \ub300\uac01 \ubc29\ud5a5\uc73c\ub85c \uc0c9\uc0c1\uc774 \uce58\uc6b0\uce68</td><td>\uc2a4\ud14c\uc774\uc9c0 Pitch/Yaw \ud2c0\uc5b4\uc9d0, \ub808\uc77c \ub9c8\ubaa8 \ud3b8\ucc28</td></tr>"
+                "<tr><td><b>\uc911\uc559/\uc8fc\ubcc0 \ubd84\ub9ac</b></td><td>\uc911\uc559 \uc815\uc0c1 + \uc8fc\ubcc0 \uc774\uc0c1 (\ub610\ub294 \ubc18\ub300)</td><td>\ucca5 \uace1\ub960(Bow/Warp) \ubb38\uc81c, \uc6e8\uc774\ud37c \ud540 \uae30\uc900\uc810 \uc624\ub958</td></tr>"
+                "<tr><td><b>\ud2b9\uc815 Die \uc9d1\uc911</b></td><td>\ub2e8 1~2\uac1c Die\ub9cc \uadf9\ub2e8\uc801 \uc0c9\uc0c1</td><td>\ud574\ub2f9 \uc704\uce58 \uc778\ucf54\ub354 \uc774\uc0c1, \ud574\ub2f9 \uc88c\ud45c \uae30\uad6c\ud559\uc801 \uc774\ubb3c\uc9c8</td></tr>"
+                "</table>"
+                "<p><b>\ud574\uc11d \ubc29\ubc95:</b> StdDev \uc5f4\uacfc \ud568\uaed8 \ud655\uc778\ud558\uc138\uc694. Avg\ub9cc \ud06c\uace0 StdDev\uac00 \uc791\uc73c\uba74 \ud574\ub2f9 \uc704\uce58\uc5d0\uc11c\uc758 \uc624\ucc28\ub294 <b>\uc77c\uad00\ub418\uace0 \ubc18\ubcf5\uc801(\uc989, \uad6c\uc870\uc801 \ubb38\uc81c)</b>\uc785\ub2c8\ub2e4. Avg\uc640 StdDev\uac00 \ubaa8\ub450 \ud06c\uba74 <b>\ub79c\ub364\ud55c \ub178\uc774\uc988</b> \uc131\ubd84\uc774 \uac15\ud55c \uac83\uc785\ub2c8\ub2e4.</p>"
+                "<hr>"
+                "<h3>Raw Deviation (\uc6d0\ucc9c \ud3b8\ucc28 \ub9e4\ud2b8\ub9ad\uc2a4)</h3>"
+                "<p>\ud1b5\uacc4 \ucc98\ub9ac \uc5c6\uc774, <b>\uac1c\ubcc4 \uce21\uc815(Repeat) \u00d7 Die \uc704\uce58</b>\uc758 \uc21c\uc218 \uce21\uc815\uac12 \ud589\ub82c\uc785\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\ud655\uc778 \ubc29\ud5a5</th><th>\ud574\uc11d \ub0b4\uc6a9</th></tr>"
+                "<tr><td><b>\uc218\ud3c9 \ubc29\ud5a5 (\ud589: Repeat)</b></td><td>\uac19\uc740 Repeat \ub0b4 Die \uac04 \uc624\ucc28 \ubd84\ud3ec \ud655\uc778. <b>\ud2b9\uc815 Repeat\uc5d0\uc11c\ub9cc \uc804 Die\uac00 \uc624\ucc28\uac00 \ud070 \uacbd\uc6b0</b> \u2192 \ud574\ub2f9 \uce21\uc815 \uc2dc\uc810\uc758 \ud658\uacbd(\uc9c4\ub3d9, \uc628\ub3c4 \ubcc0\ud654) \uc758\uc2ec</td></tr>"
+                "<tr><td><b>\uc218\uc9c1 \ubc29\ud5a5 (\uc5f4: Die)</b></td><td>\ub3d9\uc77c Die\uc5d0\uc11c Repeat \uac04 \uc624\ucc28 \ubcc0\ud654 \ud655\uc778. <b>Repeat\uc774 \ubc18\ubcf5\ub420\uc218\ub85d \uc624\ucc28\uac00 \ucee4\uc9c0\ub294 \uacbd\uc6b0</b> \u2192 \ud574\ub2f9 \uc704\uce58\uc758 <b>\uc5f4\ud314\ub300(Thermal Drift)</b> \ub610\ub294 <b>\uae30\uacc4\uc801 \uc720\uaca9 \ub204\uc801</b> \uc758\uc2ec</td></tr>"
+                "</table>"
+            ),
+            "3. XY Scatter (\uc0b0\uc810\ub3c4) \ubd84\uc11d": (
+                "<h2>\ud83c\udfaf 3. XY Scatter \ud50c\ub86f \uc2ec\ud654 \ud574\uc11d</h2>"
+                "<p>XY Scatter\ub294 <b>X \uc624\ucc28 vs Y \uc624\ucc28</b>\ub97c 2D \ud3c9\uba74\uc5d0 \ud45c\ud604\ud55c \ucc28\ud2b8\ub85c, \uc2a4\ud14c\uc774\uc9c0\uc758 <b>\ub3d9\uc791 \ud2b9\uc131\uc744 \uac00\uc7a5 \uc9c1\uad00\uc801\uc73c\ub85c \uc9c4\ub2e8</b>\ud560 \uc218 \uc788\ub294 \uadf8\ub798\ud504\uc785\ub2c8\ub2e4.</p>"
+                "<h3>3.1 \ubd84\ud3ec \ud615\ud0dc\ubcc4 \uc5d4\uc9c0\ub2c8\uc5b4 \ud574\uc11d</h3>"
+                "<table>"
+                "<tr><th>\ubd84\ud3ec \ud615\ud0dc</th><th>\uc2dc\uac01\uc801 \uc124\uba85</th><th>\uc6d0\uc778 \ubc0f \uc870\uce58</th></tr>"
+                "<tr><td><b>Bull's-eye (\ub3d9\uc2ec\uc6d0 \uc9d1\uc911)</b></td><td>\uc810\ub4e4\uc774 \uc6d0\uc810 \uc911\uc2ec\uc73c\ub85c \uc870\ubc00\ud558\uac8c \ubaa8\uc784</td><td>\u2705 \uc815\uc0c1 \uc0c1\ud0dc. \uc2a4\ud14c\uc774\uc9c0 \uc815\ubc00\ub3c4 \uc6b0\uc218</td></tr>"
+                "<tr><td><b>\uc218\uc9c1\xb7\uc218\ud3c9 \ud3b8\uc704</b></td><td>\uc810\uad70\uc774 X \ub610\ub294 Y \ud55c \ubc29\ud5a5\uc73c\ub85c\ub9cc \uce58\uc6b0\uce68</td><td>\ud574\ub2f9 \ucd95 Linear Motor \ub610\ub294 Encoder \uc624\ub958, \uc624\ud504\uc14b \ubcf4\uc815 \ud544\uc694</td></tr>"
+                "<tr><td><b>\uc0ac\uc120 \ud615\ud0dc (Linear Trend)</b></td><td>45\u00b0 \ub610\ub294 \uc784\uc758 \uac01\ub3c4\uc758 \uc120\ud615 \ubd84\ud3ec</td><td>X-Y \ucd95 \uac04 \ucee4\ud50c\ub9c1(Coupling) \ubc1c\uc0dd. \uc2a4\ud14c\uc774\uc9c0 <b>\uc9c1\uac01\ub3c4(Squareness) \ubd88\ub7c9</b> \uc758\uc2ec</td></tr>"
+                "<tr><td><b>\ub2e4\uc911 \uad70\uc9d1</b></td><td>2~3\uac1c\uc758 \uc810 \uadf8\ub8f9\uc774 \ubd84\ub9ac\ub418\uc5b4 \uc874\uc7ac</td><td>Lot \uac04 \uc7ac\ud604 \uc870\uac74 \ucc28\uc774(\uc628\ub3c4, \uc6e8\uc774\ud37c \ub85c\ub529 \ubcc0\ud654) \ub610\ub294 \ud2b9\uc815 \ub808\uc2dc\ud53c\uc5d0\ub9cc \ub098\ud0c0\ub098\ub294 \uad6c\uc870\uc801 \ucc28\uc774</td></tr>"
+                "<tr><td><b>\ud0c0\uc6d0\ud615 \ubd84\ud3ec (Ellipse)</b></td><td>\ud0c0\uc6d0\ud615\uc73c\ub85c \ub113\uac8c \ud37c\uc9c4 \ubd84\ud3ec</td><td>\ub450 \ucd95\uc758 \uc9c4\ub3d9 \ud06c\uae30\uac00 \ub2e4\ub984. <b>\uae30\uacc4 \uad6c\ub3d9\ubd80\uc758 \uac15\uc131(Stiffness) \ubd88\uade0\ud615</b> \uc758\uc2ec</td></tr>"
+                "<tr><td><b>Outlier \uc0b0\uc7ac</b></td><td>\ub300\ubd80\ubd84\uc740 \uc9d1\uc911, \uc77c\ubd80\uac00 \uba9c\ub9ac \ub5a8\uc5b4\uc9d0</td><td>\ud2b9\uc815 Lot\uc758 \uc774\uc0c1 \uc774\ubca4\ud2b8. Raw Data\uc758 Outlier \ud0ed\uacfc \uad50\ucc28 \ud655\uc778 \ud544\uc694</td></tr>"
+                "</table>"
+                "<h3>3.2 Spec Guide Box \ud574\uc11d</h3>"
+                "<p>\uadf8\ub798\ud504 \uc911\uc559\uc758 <b>\ube68\uac04 \uc810\uc120 \uc0ac\uac01\ud615(Guide Box)</b> = \u00b1 Spec Range \ud55c\uacc4\uce58\uc785\ub2c8\ub2e4.</p>"
+                "<ul>"
+                "<li>\uc810\ub4e4\uc758 <b>\ubd84\ud3ec \uc911\uc2ec(Centroid)\uc774 \ubc15\uc2a4 \uc548</b>\uc5d0 \uc788\uc5b4\ub3c4 <b>\uc77c\ubd80 \uc810\uc774 \ubc16</b>\uc5d0 \uc788\uc73c\uba74 \u2192 \uc624\ucc28 Range \ucd08\uacfc\ub85c FAIL</li>"
+                "<li>\ubc15\uc2a4\uac00 \ub9e4\uc6b0 <b>\uc88c\uc6b0 \ube61\ube61\ud558\uac8c \ucc44\uc6cc\uc9c4</b> \uacbd\uc6b0 \u2192 \uc7a5\ube44\uac00 Spec \ud55c\uacc4\uc120 \uacbd\uacc4\uc5d0\uc11c \uc6b4\uc6a9 \uc911. <b>Spec \uc5ec\uc720\ub3c4(Spec Margin) \uac80\ud1a0 \ud544\uc694</b></li>"
+                "<li><b>Log Scale \uc804\ud658 \uc2dc</b> \u2192 \uadf9\ub2e8\uc801 Outlier\uc758 \uc601\ud5a5\uc744 \uc904\uc774\uace0 \uc804\uccb4 \ubd84\ud3ec \ud328\ud134 \ud30c\uc545\uc5d0 \uc720\ub9ac</li>"
+                "</ul>"
+            ),
+            "4. Vector & Wafer Map \uc774\ud574": (
+                "<h2>\u2197\ufe0f 4. Vector Map & Wafer Contour \uc2ec\ud654 \ubd84\uc11d</h2>"
+                "<h3>4.1 Vector Map (\ubca1\ud130\ub9f5) \ud328\ud134 \ud574\uc11d</h3>"
+                "<p>\uac01 Die \uc704\uce58\uc5d0\uc11c\uc758 <b>\uc624\ucc28 \ubca1\ud130(\ud06c\uae30 + \ubc29\ud5a5)</b>\ub97c \ud654\uc0b4\ud45c\ub85c \ud45c\ud604\ud569\ub2c8\ub2e4. \ub2e8\uc21c\ud55c \ud06c\uae30\ubbf8 \uc544\ub2c8\ub77c <b>\ubc29\ud5a5\uc131 \ud328\ud134</b>\uc774 \ud575\uc2ec\uc785\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\ubca1\ud130 \ud328\ud134</th><th>\uc5d4\uc9c0\ub2c8\uc5b4 \ud574\uc11d \ubc0f \uc870\uce58</th></tr>"
+                "<tr><td><b>\ubaa8\ub4e0 \ud654\uc0b4\ud45c\uac00 \uac19\uc740 \ubc29\ud5a5</b></td><td>\uace0\uc815 \uc624\ud504\uc14b(Constant Offset). Mean \uac12\uc774 0\uc5d0\uc11c \uce58\uc6b0\uccd0 \uc788\ub294 \uc0c1\ud0dc. <b>Calibration\uc73c\ub85c \uc989\uc2dc \uc218\uc815 \uac00\ub2a5</b></td></tr>"
+                "<tr><td><b>\ubc29\uc0ac\ud615 (\uc911\uc559\u2192\uac00\uc7a5\uc790\ub9ac\ub85c \ud37c\uc9d0)</b></td><td>\uc2a4\ucf00\uc77c \uc624\ucc28(Scale Error). <b>EGA \uc2a4\ucf00\uc77c \ud30c\ub77c\ubbf8\ud130 \uc7ac\ubcf4\uc815</b> \ud544\uc694</td></tr>"
+                "<tr><td><b>\uc18c\uc6a9\ub3cc\uc774\ud615 (Swirl)</b></td><td>\uc2a4\ud14c\uc774\uc9c0 \ud68c\uc804(Rotation/Theta) \uc624\ucc28. <b>Theta \ucd95 \uc624\ud504\uc14b \uc870\uc815</b> \ud544\uc694</td></tr>"
+                "<tr><td><b>\uc9c0\uc5ed\uc801 \ubd88\uaddc\uce59</b></td><td>\ud2b9\uc815 \uad6c\uc5ed\ub9cc \ubca1\ud130 \ubc29\ud5a5\xb7\ud06c\uae30 \uc774\uc0c1 \u2192 \ud574\ub2f9 \uc601\uc5ed\uc758 <b>\ucca5(Chuck) \ud540 \uc774\uc0c1</b> \ub610\ub294 <b>\uad6d\uc18c \uae30-구 \ub9c8\ubaa8</b> \uac80\ud1a0</td></tr>"
+                "<tr><td><b>\ub79c\ub364 \ubc29\ud5a5 (\ubb34\uc791\uc704)</b></td><td>\uad6c\uc870\uc801 \ud328\ud134 \uc5c6\uc74c \u2192 \uce21\uc815 \uc7ac\ud604\uc131 \uc790\uccb4\uac00 \ubd80\uc871. <b>\uc9c4\ub3d9 \ubc29\uc9c0(Isolation)</b>\ub098 \uce21\uc815 \ud658\uacbd \uac1c\uc120 \uac80\ud1a0</td></tr>"
+                "</table>"
+                "<p><b>Vector Scale \uc2ac\ub77c\uc774\ub354 \ud65c\uc6a9:</b> \uc2e4\uc81c \uc624\ucc28\ub294 \uc218 \u03bcm \uc774\ub0b4\ub77c \uc721\uc548 \uad00\ucc30\uc774 \uc5b4\ub835\uc2b5\ub2c8\ub2e4. \uc2ac\ub77c\uc774\ub354\ub85c \ubca1\ud130 \uae38\uc774\ub97c \uc218\uc2ed~\uc218\ubc31 \ubc30 \uc99d\ud3ed\ud558\uc5ec \ud328\ud134\uc744 \uba85\ud655\ud558\uac8c \ud655\uc778\ud558\uc138\uc694. \ub2e8, <b>\uc99d\ud3ed\ub41c \uae38\uc774 \uc790\uccb4\uac00 \uc2e4\uc81c \uc624\ucc28 \uc218\uce58\uac00 \uc544\ub2d8</b>\uc5d0 \uc720\uc758\ud558\uc138\uc694.</p>"
+                "<hr>"
+                "<h3>4.2 Wafer Contour (\ub4f1\uace0\uc120 \ub9f5) \ud574\uc11d</h3>"
+                "<p>Wafer \uc804\uba74\uc758 <b>\uc624\ucc28 \ubd84\ud3ec\ub97c \uc5f0\uc18d\uc801\uc778 \ucf5c\ub7ec \ub9f5</b>\uc73c\ub85c \uc2dc\uac01\ud654\ud569\ub2c8\ub2e4. \uce21\uc815\ud558\uc9c0 \uc54a\uc740 Die \uc0ac\uc774\uc758 \uac12\uc740 \ubcf4\uac04(Interpolation)\uc73c\ub85c \ucc44\uc6c0\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\uc0c9\uc0c1</th><th>\uc758\ubbf8</th></tr>"
+                "<tr><td>\ud83d\udd34 \ubd89\uc740 \uacc4\uc5f4</td><td>\uc591(+) \ubc29\ud5a5\uc758 \ud070 \uc624\ucc28 \uad6c\uc5ed (High-Deviation Zone)</td></tr>"
+                "<tr><td>\ud83d\udd35 \uccad\uc0c9/\ub179\uc0c9 \uacc4\uc5f4</td><td>\uc74c(-) \ubc29\ud5a5 \ub610\ub294 \uc624\ucc28\uac00 \uc791\uc740 \uad6c\uc5ed (Low-Deviation Zone)</td></tr>"
+                "</table>"
+                "<p><b>\uc0c9\uc0c1 \uc804\ud658\uc774 \uae09\uaca9\ud55c \uad6c\uc5ed</b> \u2192 <b>\uc624\ucc28 \uad6c\ub300(Gradient)\uac00 \uae09\uaca9</b>\ud558\uac8c \ubcc0\ud654. \ud574\ub2f9 \uc704\uce58\uc5d0 \uae30\uad6c\ud559\uc801 \ubcc0\uace1\uc810 \uc874\uc7ac \uac00\ub2a5\uc131.</p>"
+                "<p><b>X / Y \ucc44\ub110 \uad50\ucc28 \ube44\uad50:</b> X \ucc44\ub110\uc740 \uc815\uc0c1\uc774\uace0 Y\ub9cc \ub4f1\uace0\uc120\uc774 \uae30\uc6b8\uc5b4\uc9c4\ub2e4\uba74 \u2192 Y\ucd95 \uc804\uc6a9 \ubb38\uc81c(\uc778\ucf54\ub354, \ub808\uc77c, \uc120\ud615 \ubaa8\ud130) \uaca9\ub9ac \uac80\ud1a0. X\uc640 Y \ub450 \uc18c\uc758 \uccb4\ubbf8\ub8a8 \ud310\ub3c4\uac00 \uc720\uc0ac\ud558\ub2e4\uba74 \u2192 \uacf5\ud1b5 \uc6d0\uc778(\uae30\uc6b8\uc5b4\uc9c4 \ucca5, \ud558\uc911 \ud3b8\uc2ec) \uac00\ub2a5\uc131.</p>"
+            ),
+            "5. Spec \ud310\uc815\uacfc \uc624\ub958 \ucc98\ub9ac": (
+                "<h2>\u2705 5. Spec \ud310\uc815 (PASS/FAIL) \uae30\uc900 \ubc0f \uc124\uc815 \ub85c\uc9c1</h2>"
+                "<h3>5.1 \ud310\uc815 \ud750\ub984</h3>"
+                "<table>"
+                "<tr><th>\ub2e8\uacc4</th><th>\ub0b4\uc6a9</th></tr>"
+                "<tr><td>1. \uc2a4\uce94 \ub370\uc774\ud130 \uc218\uc9d1</td><td>CSV \ud3f4\ub354\uc5d0\uc11c \uc6d0\uc2dc \uc218\uce58 \ub85c\ub4dc</td></tr>"
+                "<tr><td>2. Deviation Matrix \uacc4\uc0b0</td><td>overall_range, overall_stddev \uc0b0\ucd9c</td></tr>"
+                "<tr><td>3. Spec\uac12\uacfc \ube44\uad50</td><td>overall_range \u2264 spec_range <b>and</b> overall_stddev \u2264 spec_stddev</td></tr>"
+                "<tr><td>4. \ucd5c\uc885 \ud310\uc815</td><td><b>\ub450 \uc870\uac74 \ubaa8\ub450 \ucda9\uc871</b> \u2192 \u2705 PASS / <b>\ud558\ub098\ub77c\ub3c4 \ucd08\uacfc</b> \u2192 \u274c FAIL</td></tr>"
+                "</table>"
+                "<h3>5.2 Spec \uc124\uc815 \uac12 \uc758\ubbf8</h3>"
+                "<table>"
+                "<tr><th>Spec \ud56d\ubaa9</th><th>\uc758\ubbf8</th><th>\uc124\uc815 \uac00\uc774\ub4dc</th></tr>"
+                "<tr><td><b>spec_range</b></td><td>\ud5c8\uc6a9\ub418\ub294 \ucd5c\ub300 \uc624\ucc28 \ubc94\uc704 (\u03bcm)</td><td>\uace0\uac1d/\uc7a5\ube44 \uc0ac\uc591\uc758 Positioning Accuracy \uac12\uc744 \uae30\uc900\uc73c\ub85c \uc124\uc815</td></tr>"
+                "<tr><td><b>spec_stddev</b></td><td>\ud5c8\uc6a9\ub418\ub294 \ucd5c\ub300 \ud45c\uc900\ud3b8\ucc28 (\u03bcm)</td><td>Repeatability \uc0ac\uc591 \uae30\uc900\uc73c\ub85c \uc124\uc815. \uc77c\ubc18\uc801\uc73c\ub85c range\uc758 1/3~1/5 \uc218\uc900</td></tr>"
+                "</table>"
+                "<h3>5.3 \ud3f4\ub354\uba85 \ubd88\uc77c\uce58 \uc5d0\ub7ec (\u26a0\ufe0f \uac00\uc7a5 \ud754\ud55c \uc6b4\uc601 \uc624\ub958)</h3>"
+                "<p>\uce21\uc815 \uc7a5\ube44\uc5d0\uc11c \ub0b4\ubcf4\ub0b8 \ub370\uc774\ud130 \ud3f4\ub354 \uc774\ub984\uc740 Spec \uc124\uc815 \uc774\ub984\uacfc <b>\uc815\ud655\ud788</b> \uc77c\uce58\ud574\uc57c \ud569\ub2c8\ub2e4.</p>"
+                "<table>"
+                "<tr><th>\uc62c\ubc14\ub978 \ud3f4\ub354\uba85 (\u2705)</th><th>\uc798\ubabb\ub41c \ud3f4\ub354\uba85 (\u274c)</th></tr>"
+                "<tr><td>Vision Pattern</td><td>1. Vision Pattern Recognize, VisionPttrn</td></tr>"
+                "<tr><td>In-Die Align</td><td>In Die Align, in_die_align</td></tr>"
+                "<tr><td>LLC Translation</td><td>LLC Trans, LLCtranslation</td></tr>"
+                "<tr><td>Global Align</td><td>4. Global Align, GlobalAlign</td></tr>"
+                "</table>"
+                "<p>\ubd88\uc77c\uce58 \uc2dc \ubd84\uc11d\uc774 <b>\uc6d0\ucc9c \ucc28\ub2e8</b>\ub429\ub2c8\ub2e4. \ud0d0\uc0c9\uae30\uc5d0\uc11c \ud3f4\ub354 \uc774\ub984\uc744 \ubcc0\uacbd \ud6c4 \uc7ac\uc2a4\uce94\ud558\uc138\uc694.</p>"
+                "<h3>5.4 Cpk\uc640 Spec Range \uc5f0\uacc4 \ud574\uc11d</h3>"
+                "<p>Cpk\ub294 <code>spec_limits</code>\uc758 LSL/USL \uae30\uc900\uc774\uba70, PASS/FAIL \ud310\uc815\uc740 <code>spec_deviation</code>\uc758 <code>spec_range</code>/<code>spec_stddev</code> \uae30\uc900\uc785\ub2c8\ub2e4. \ub450 \uae30\uc900\uc774 <b>\ub3c5\ub9bd\uc801</b>\uc73c\ub85c \ub3d9\uc791\ud558\ubbc0\ub85c, <b>Cpk\uac00 \ub192\uc544\ub3c4 Range\uac00 Spec\uc744 \ucd08\uacfc\ud558\uba74 FAIL</b>\uc774 \ub0a0 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \ubc18\ub4dc\uc2dc \ub450 \uc9c0\ud45c\ub97c \ud568\uaed8 \ud655\uc778\ud558\uc138\uc694.</p>"
+            )
+        }
+
+        for title in self.contents.keys():
+            self.nav_list.addItem(title)
+            
+        self.nav_list.currentRowChanged.connect(self._on_nav_changed)
+
+        # Right Panel (Content)
+        self.content_browser = QTextBrowser()
+        self.content_browser.setStyleSheet(f"""
+            QTextBrowser {{ background: {BG2}; border: 1px solid {BG3}; border-radius: 6px; padding: 24px; font-size: 11pt; }}
+        """)
+        self.content_browser.setOpenExternalLinks(False)
+
+        splitter.addWidget(self.nav_list)
+        splitter.addWidget(self.content_browser)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 4)
+
+        layout.addWidget(splitter)
+        
+        # 버튼 박스
+        btn_box = QDialogButtonBox(QDialogButtonBox.Close)
+        btn_box.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {FG}; padding: 8px 30px; border-radius: 4px; border: 1px solid {BG3}; font-weight: bold; }}
+            QPushButton:hover {{ background: {FG2}; color: {BG}; }}
+        """)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+        self.nav_list.setCurrentRow(0)
+
+    def _on_nav_changed(self, idx):
+        if idx < 0: return
+        itemTitle = self.nav_list.item(idx).text()
+        html_body = self.contents.get(itemTitle, "")
+        
+        css = (
+            f"h2 {{ color: {ACCENT}; border-bottom: 2px solid {BG3}; padding-bottom: 12px; margin-bottom: 20px; font-size: 18pt; }}"
+            f"h3 {{ color: {ACCENT}; margin-top: 32px; font-size: 14pt; }}"
+            f"p {{ line-height: 1.6; margin-bottom: 16px; color: {FG}; }}"
+            f"b {{ color: {GREEN}; font-weight: bold; font-size: 11pt; }}"
+            f"ul {{ margin-top: 8px; margin-bottom: 16px; margin-left: -10px; }}"
+            f"li {{ margin-bottom: 10px; line-height: 1.6; color: {FG}; }}"
+            f"hr {{ border: none; border-top: 1px solid {BG3}; margin: 28px 0; }}"
+            f"table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}"
+            f"th, td {{ border: 1px solid {BG3}; padding: 12px; text-align: left; line-height: 1.4; }}"
+            f"th {{ background-color: {BG}; color: {FG}; font-weight: bold; border-bottom: 2px solid {BG3}; }}"
+            f"td {{ color: {FG}; }}"
+            f"code {{ background-color: rgba(0,0,0,0.3); padding: 4px 6px; border-radius: 4px; color: {RED}; font-family: Consolas, monospace; }}"
+        )
+        
+        full_html = "<html><head><style>" + css + "</style></head><body>" + html_body + "</body></html>"
+        self.content_browser.setHtml(full_html)
+
+
+# ═══════════════════════════════════════════════
 #  Main Application
 # ═══════════════════════════════════════════════
 class DataAnalyzerApp(QMainWindow):
@@ -562,11 +761,11 @@ class DataAnalyzerApp(QMainWindow):
         self.path_edit.setMaximumWidth(450)
         top.addWidget(self.path_edit)
 
-        btn_browse = QPushButton("찾아보기")
+        btn_browse = QPushButton("Open")
         btn_browse.clicked.connect(self._browse_folder)
         top.addWidget(btn_browse)
 
-        btn_scan = QPushButton("🔄 스캔 & 분석")
+        btn_scan = QPushButton("🔄 Scan & Analysis")
         btn_scan.setProperty("accent", True)
         btn_scan.clicked.connect(self._scan_folder)
         top.addWidget(btn_scan)
@@ -661,7 +860,7 @@ class DataAnalyzerApp(QMainWindow):
         # 헤더 행: 타이틀 + ▼/▲ 토글 + 전체 선택 + 안정화 제외 + 정보
         filter_header = QHBoxLayout()
         filter_header.setSpacing(8)
-        lbl_filter = QLabel("🎯 Die 필터")
+        lbl_filter = QLabel("Die 필터")
         lbl_filter.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold; border: none;")
         filter_header.addWidget(lbl_filter)
 
@@ -777,7 +976,7 @@ class DataAnalyzerApp(QMainWindow):
         self.die_y_table = CopyableTable()
         self.die_tabs.addTab(self.die_x_table, "X Die Average")
         self.die_tabs.addTab(self.die_y_table, "Y Die Average")
-        self.data_tabs.addTab(die_widget, "🔢 Die별 평균")
+        self.data_tabs.addTab(die_widget, "Die별 평균")
 
         # Sub 3: Raw Deviation (X/Y)
         dev_widget = QWidget()
@@ -789,7 +988,7 @@ class DataAnalyzerApp(QMainWindow):
         self.dev_y_table = CopyableTable()
         self.dev_tabs.addTab(self.dev_x_table, "X offset")
         self.dev_tabs.addTab(self.dev_y_table, "Y offset")
-        self.data_tabs.addTab(dev_widget, "🔲 Raw Deviation")
+        self.data_tabs.addTab(dev_widget, "Raw Deviation")
 
         # Sub 4: Raw Data — 폴더 열기 버튼 포함
         raw_widget = QWidget()
@@ -821,7 +1020,7 @@ class DataAnalyzerApp(QMainWindow):
             self.raw_table.setColumnWidth(col, width)
         self.raw_table.cellDoubleClicked.connect(self._on_row_double_click)
         raw_layout.addWidget(self.raw_table, 1)
-        self.data_tabs.addTab(raw_widget, "📄 원본 데이터")
+        self.data_tabs.addTab(raw_widget, "원본 데이터")
 
         splitter.addWidget(left)
 
@@ -968,11 +1167,11 @@ class DataAnalyzerApp(QMainWindow):
         # Chart area
         self._vector_chart = ChartWidget()
         vm_layout.addWidget(self._vector_chart, 1)
-        self.chart_widgets['↗️ Vector Map'] = self._vector_chart
+        self.chart_widgets['Vector Map'] = self._vector_chart
 
         self.vector_scale_slider.valueChanged.connect(self._on_vector_scale_changed)
 
-        _add_chart('기본 분석', '↗️ Vector Map', vm_container, register=False)
+        _add_chart('기본 분석', 'Vector Map', vm_container, register=False)
 
         # 인터랙티브 (pyqtgraph)
         # ─── 📈 Lot 트렌드: 컨테이너 (Lot 필터 + 차트) ───
@@ -1019,7 +1218,7 @@ class DataAnalyzerApp(QMainWindow):
                     b.rect().bottomLeft()), t, b, b.rect(), 10000))
         lt_toolbar.addWidget(lt_help_btn)
 
-        lt_lbl = QLabel("🎯 Lot 필터")
+        lt_lbl = QLabel("Lot 필터")
         lt_lbl.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold;")
         lt_toolbar.addWidget(lt_lbl)
 
@@ -1033,7 +1232,7 @@ class DataAnalyzerApp(QMainWindow):
         self._lot_select_all_btn.clicked.connect(self._lot_filter_select_all)
         lt_toolbar.addWidget(self._lot_select_all_btn)
 
-        self._lot_range_btn = QPushButton("📐 범위 지정")
+        self._lot_range_btn = QPushButton("범위 지정")
         self._lot_range_btn.setFixedHeight(22)
         self._lot_range_btn.setToolTip(
             "표시할 Lot 범위를 지정합니다.\n"
@@ -1197,10 +1396,25 @@ class DataAnalyzerApp(QMainWindow):
         export_header.setAlignment(Qt.AlignCenter)
         export_layout.addWidget(export_header)
 
+        export_desc_layout = QHBoxLayout()
         export_desc = QLabel("분석 결과를 다양한 형식으로 내보낼 수 있습니다.")
         export_desc.setStyleSheet(f"color:{FG2}; font-size:10pt;")
-        export_desc.setAlignment(Qt.AlignCenter)
-        export_layout.addWidget(export_desc)
+        export_desc.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        export_desc_layout.addWidget(export_desc)
+
+        export_desc_layout.addStretch()
+
+        btn_guide = QPushButton("📖 분석 가이드 보기")
+        btn_guide.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {ACCENT}; border: 1px solid {BG3};
+                          border-radius: 4px; font-size: 10pt; font-weight: bold; padding: 8px 16px; }}
+            QPushButton:hover {{ background: {ACCENT}; color: {BG}; border: 1px solid {ACCENT}; }}
+        """)
+        btn_guide.setCursor(Qt.PointingHandCursor)
+        btn_guide.clicked.connect(self._show_guide_dialog)
+        export_desc_layout.addWidget(btn_guide)
+
+        export_layout.addLayout(export_desc_layout)
 
         export_layout.addSpacing(10)
 
@@ -1696,7 +1910,7 @@ class DataAnalyzerApp(QMainWindow):
         dev_spec = self.settings.get('spec_deviation', {})
         ds = dev_spec.get(short, {})
         if not ds:
-            self.logger.warning(f"spec_deviation에 '{short}' 키 없음 → PASS/FAIL 판정 불가")
+            self.logger.warn(f"spec_deviation에 '{short}' 키 없음 → PASS/FAIL 판정 불가")
         spec_r = ds.get('spec_range')
         spec_s = ds.get('spec_stddev')
 
@@ -1746,6 +1960,7 @@ class DataAnalyzerApp(QMainWindow):
                     f"{c.get('cv_percent', 0):.1f}", str(c.get('outliers', 0))]
             for col, v in enumerate(vals):
                 item = QTableWidgetItem(v)
+                item.setTextAlignment(Qt.AlignCenter)
                 t.setItem(row, col, item)
 
             # X/Y Pass/Fail 계산
@@ -1820,24 +2035,25 @@ class DataAnalyzerApp(QMainWindow):
             # Die label
             item_die = QTableWidgetItem(ds['die'])
             item_die.setBackground(QColor(BG3))
+            item_die.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, 0, item_die)
             # Avg — diverging
             bg = _heatmap_diverging(ds['avg'] / avg_max if avg_max > 0 else 0)
             item = QTableWidgetItem(f"{ds['avg']:.3f}")
             item.setBackground(bg); item.setForeground(_contrast_fg(bg))
-            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, 1, item)
             # StdDev — single
             bg = _heatmap_single(ds['stddev'] / std_max if std_max > 0 else 0)
             item = QTableWidgetItem(f"{ds['stddev']:.3f}")
             item.setBackground(bg); item.setForeground(_contrast_fg(bg))
-            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, 2, item)
             # Range — single
             bg = _heatmap_single(ds['range'] / rng_max if rng_max > 0 else 0)
             item = QTableWidgetItem(f"{ds['range']:.3f}")
             item.setBackground(bg); item.setForeground(_contrast_fg(bg))
-            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            item.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, 3, item)
 
     def _update_die_avg_tables(self):
@@ -1865,6 +2081,7 @@ class DataAnalyzerApp(QMainWindow):
         for i, rl in enumerate(repeat_labels):
             item_rl = QTableWidgetItem(rl[:10])
             item_rl.setBackground(QColor(BG3))
+            item_rl.setTextAlignment(Qt.AlignCenter)
             table.setItem(i, 0, item_rl)
             for j, dl in enumerate(die_labels):
                 v = matrix.get(rl, {}).get(dl)
@@ -2137,7 +2354,7 @@ class DataAnalyzerApp(QMainWindow):
         try:
             if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
                 scale_pct = self.vector_scale_slider.value()
-                self.chart_widgets['↗️ Vector Map'].set_figure(
+                self.chart_widgets['Vector Map'].set_figure(
                     viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
                                         title=f'{short} — Vector Map',
                                         wafer_radius_um=wr,
@@ -2453,7 +2670,7 @@ class DataAnalyzerApp(QMainWindow):
         recipe = self.recipes[self.current_recipe_idx]
         short = recipe.get('short_name', '')
         try:
-            self.chart_widgets['↗️ Vector Map'].set_figure(
+            self.chart_widgets['Vector Map'].set_figure(
                 viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
                                     title=f'{short} — Vector Map',
                                     wafer_radius_um=wr,
@@ -2768,6 +2985,10 @@ class DataAnalyzerApp(QMainWindow):
                 QTimer.singleShot(0, lambda: self.logger.error(f"PDF 오류: {e}"))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _show_guide_dialog(self):
+        dlg = GuideDialog(self)
+        dlg.exec()
 
     def _open_spec_config(self):
         from PySide6.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QDialogButtonBox
