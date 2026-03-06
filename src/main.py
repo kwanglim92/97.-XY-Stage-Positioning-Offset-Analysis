@@ -16,7 +16,7 @@ from datetime import datetime
 from functools import partial
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QSplitter, QPushButton, QLabel, QLineEdit, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox, QInputDialog,
@@ -658,12 +658,24 @@ class DataAnalyzerApp(QMainWindow):
         die_filter_layout.setContentsMargins(8, 4, 8, 4)
         die_filter_layout.setSpacing(4)
 
-        # 헤더 행: 타이틀 + 전체 선택 + 안정화 제외 + 정보
+        # 헤더 행: 타이틀 + ▼/▲ 토글 + 전체 선택 + 안정화 제외 + 정보
         filter_header = QHBoxLayout()
         filter_header.setSpacing(8)
         lbl_filter = QLabel("🎯 Die 필터")
         lbl_filter.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold; border: none;")
         filter_header.addWidget(lbl_filter)
+
+        # ▼/▲ 토글 버튼
+        self._die_expand_btn = QPushButton("▼")
+        self._die_expand_btn.setFixedSize(24, 22)
+        self._die_expand_btn.setToolTip("Die 필터 확장 — 포지션 맵과 함께 보기")
+        self._die_expand_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {ACCENT}; border: none;
+                          border-radius: 3px; font-size: 10pt; font-weight: bold; }}
+            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+        """)
+        self._die_expand_btn.clicked.connect(self._toggle_die_filter_expand)
+        filter_header.addWidget(self._die_expand_btn)
 
         self.die_select_all_btn = QPushButton("✅ 전체 선택")
         self.die_select_all_btn.setFixedHeight(22)
@@ -694,14 +706,50 @@ class DataAnalyzerApp(QMainWindow):
         filter_header.addStretch()
         die_filter_layout.addLayout(filter_header)
 
-        # Die 체크박스 컨테이너 (동적으로 채워짐)
+        # 접힌 상태: Die 체크박스 한줄 (기존 FlowLayout)
         self._die_cb_container = QWidget()
         self._die_cb_container.setStyleSheet("border: none;")
         self._die_cb_flow = FlowLayout(self._die_cb_container, margin=2, spacing=4)
         die_filter_layout.addWidget(self._die_cb_container)
 
-        self._die_checkboxes = {}  # {die_num(0-based): QCheckBox}
+        # 펼친 상태: 고정 300px, 좌(미니맵) + 우(그리드 체크박스)
+        self._die_expanded_panel = QWidget()
+        self._die_expanded_panel.setFixedHeight(300)
+        self._die_expanded_panel.setStyleSheet("border: none;")
+        self._die_expanded_panel.setVisible(False)
+        exp_layout = QHBoxLayout(self._die_expanded_panel)
+        exp_layout.setContentsMargins(0, 4, 0, 0)
+        exp_layout.setSpacing(4)
+
+        # 좌측: 미니 Die Position Map 캔버스 컨테이너
+        self._mini_map_container = QWidget()
+        self._mini_map_container.setStyleSheet("border: none;")
+        self._mini_map_layout = QVBoxLayout(self._mini_map_container)
+        self._mini_map_layout.setContentsMargins(0, 0, 0, 0)
+        self._mini_map_canvas = None  # FigureCanvasQTAgg — 동적으로 교체
+        exp_layout.addWidget(self._mini_map_container, 5)
+
+        # 우측: Die 체크박스 그리드 (스크롤 가능)
+        self._die_grid_scroll = QScrollArea()
+        self._die_grid_scroll.setWidgetResizable(True)
+        self._die_grid_scroll.setStyleSheet(f"""
+            QScrollArea {{ background: {BG2}; border: none; }}
+            QWidget {{ background: {BG2}; }}
+        """)
+        self._die_grid_widget = QWidget()
+        self._die_grid_layout = QGridLayout(self._die_grid_widget)
+        self._die_grid_layout.setContentsMargins(4, 4, 4, 4)
+        self._die_grid_layout.setSpacing(4)
+        self._die_grid_scroll.setWidget(self._die_grid_widget)
+        exp_layout.addWidget(self._die_grid_scroll, 3)
+
+        die_filter_layout.addWidget(self._die_expanded_panel)
+
+        self._die_checkboxes = {}  # {die_num(0-based): QCheckBox} — 접힌 상태용
+        self._die_grid_checkboxes = {}  # {die_num(0-based): QCheckBox} — 펼친 상태용
         self._die_filter_updating = False  # 재진입 방지 플래그
+        self._die_filter_expanded = False  # 토글 상태
+        self._mini_die_scatter_map = {}  # {die_idx: scatter_artist}
 
         data_layout.addWidget(die_filter_frame)
         self.main_tabs.addTab(data_widget, "🗄️ 데이터 테이블")
@@ -714,7 +762,7 @@ class DataAnalyzerApp(QMainWindow):
         hdr = self.sum_table.horizontalHeader()
         for col in range(len(cols_s)):
             hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(1, 30), (8, 30), (9, 30), (10, 30), (11, 45)]:
+        for col, width in [(1, 70), (2, 35), (8, 30), (9, 30), (10, 30), (11, 30)]:
             hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.sum_table.setColumnWidth(col, width)
         self.data_tabs.addTab(self.sum_table, "📊 Summary")
@@ -1016,7 +1064,90 @@ class DataAnalyzerApp(QMainWindow):
         self.chart_widgets['📈 Lot 트렌드'] = self._lot_trend_chart
         _add_chart('인터랙티브', '📈 Lot 트렌드', lot_trend_container, register=False)
 
-        _add_chart('인터랙티브', '🎯 XY Scatter', InteractiveChartWidget())
+        # ─── 🎯 XY Scatter: 컨테이너 (툴바 + 차트 + 사이드 범례) ───
+        xy_scatter_container = QWidget()
+        xs_layout = QVBoxLayout(xy_scatter_container)
+        xs_layout.setContentsMargins(0, 0, 0, 0)
+        xs_layout.setSpacing(2)
+
+        xs_toolbar = QHBoxLayout()
+        xs_toolbar.setContentsMargins(8, 4, 8, 0)
+
+        # 안내 라벨
+        xs_info = QLabel("💡 우측 범례에서 Die를 클릭하면 해당 Die만 강조됩니다")
+        xs_info.setStyleSheet(f"color: {FG2}; font-size: 8pt;")
+        xs_toolbar.addWidget(xs_info)
+        xs_toolbar.addStretch()
+
+        # Log 스케일 토글 버튼
+        self._xy_log_btn = QPushButton("📐 Log 스케일")
+        self._xy_log_btn.setCheckable(True)
+        self._xy_log_btn.setFixedHeight(22)
+        self._xy_log_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {FG2}; border: none;
+                          border-radius: 3px; padding: 0 10px; font-size: 8pt; }}
+            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+            QPushButton:checked {{ background: {ACCENT}; color: white; font-weight: bold; }}
+        """)
+        self._xy_log_btn.setToolTip(
+            "Signed Log 변환: sign × log₁₀(1 + |value|)\n"
+            "양/음 오프셋의 부호를 유지하면서 큰 값 차이를 압축합니다.")
+        self._xy_log_btn.clicked.connect(self._toggle_xy_log_scale)
+        xs_toolbar.addWidget(self._xy_log_btn)
+
+        xs_layout.addLayout(xs_toolbar)
+
+        # 본문: 차트(좌) + 범례 패널(우)
+        xs_body = QHBoxLayout()
+        xs_body.setSpacing(2)
+
+        self._xy_scatter_chart = InteractiveChartWidget()
+        xs_body.addWidget(self._xy_scatter_chart, 7)
+        self.chart_widgets['🎯 XY Scatter'] = self._xy_scatter_chart
+
+        # 사이드 범례 패널
+        self._xy_legend_panel = QWidget()
+        self._xy_legend_panel.setFixedWidth(120)
+        self._xy_legend_panel.setStyleSheet(f"background: {BG2};")
+        legend_vbox = QVBoxLayout(self._xy_legend_panel)
+        legend_vbox.setContentsMargins(4, 4, 4, 4)
+        legend_vbox.setSpacing(2)
+
+        # [전체 표시] 리셋 버튼
+        self._xy_legend_reset_btn = QPushButton("전체 표시")
+        self._xy_legend_reset_btn.setFixedHeight(22)
+        self._xy_legend_reset_btn.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {ACCENT}; border: none;
+                          border-radius: 3px; font-size: 8pt; font-weight: bold; }}
+            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+        """)
+        self._xy_legend_reset_btn.clicked.connect(self._xy_legend_reset)
+        legend_vbox.addWidget(self._xy_legend_reset_btn)
+
+        # Die 버튼 스크롤 영역
+        self._xy_legend_scroll = QScrollArea()
+        self._xy_legend_scroll.setWidgetResizable(True)
+        self._xy_legend_scroll.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: {BG2}; }}
+            QWidget {{ background: {BG2}; }}
+        """)
+        self._xy_legend_btn_widget = QWidget()
+        self._xy_legend_btn_layout = QVBoxLayout(self._xy_legend_btn_widget)
+        self._xy_legend_btn_layout.setContentsMargins(0, 2, 0, 2)
+        self._xy_legend_btn_layout.setSpacing(2)
+        self._xy_legend_btn_layout.addStretch()
+        self._xy_legend_scroll.setWidget(self._xy_legend_btn_widget)
+        legend_vbox.addWidget(self._xy_legend_scroll, 1)
+
+        xs_body.addWidget(self._xy_legend_panel)
+        xs_layout.addLayout(xs_body, 1)
+
+        self._xy_log_mode = False
+        self._xy_legend_buttons = {}  # {die_label: QPushButton}
+        self._xy_highlighted_dies = set()  # 현재 범례에서 선택된 Die 세트
+
+        _add_chart('인터랙티브', '🎯 XY Scatter', xy_scatter_container, register=False)
+
 
         # ─── 📊 분포: X/Y 서브탭 ───
         dist_tabs = QTabWidget()
@@ -1214,31 +1345,42 @@ class DataAnalyzerApp(QMainWindow):
             QMessageBox.information(self, "알림", "Recipe 구조를 찾지 못했습니다.")
             return
 
-        # ─── 표준 Recipe 이름 검증 ───
-        std_names = self.settings.get('standard_recipe_names', [])
+        # ─── 표준 Recipe 이름 검증 (Spec 설정 기준) ───
+        spec_dev = self.settings.get('spec_deviation', {})
+        std_names = list(spec_dev.keys())
+
         if std_names:
+            # 설정의 스펙 이름과 발견된 Recipe의 short_name이 일치하는지 확인
+            # (recipe_scanner가 '1. Vision Pattern' 처럼 앞의 숫자를 자른 short_name을 제공함)
             detected = [r['short_name'] for r in self.recipes]
             mismatched = []
-            for d in detected:
-                if not any(std.lower() in d.lower() or d.lower() in std.lower()
-                           for std in std_names):
-                    mismatched.append(d)
+            for r in self.recipes:
+                is_match = False
+                for std in std_names:
+                    # 엄격한 일치 (대소문자 무시, 공백 제거)
+                    std_clean = std.strip().lower()
+                    if std_clean == r['name'].strip().lower() or \
+                       std_clean == r['short_name'].strip().lower():
+                        is_match = True
+                        break
+
+                if not is_match:
+                    mismatched.append(r['name'])  # 불일치하면 원본 폴더명을 기록
 
             if mismatched:
                 std_list = '\n'.join(f"  • {s}" for s in std_names)
-                det_list = '\n'.join(f"  • {d}" for d in detected)
-                mis_list = '\n'.join(f"  ⚠ {m}" for m in mismatched)
-                reply = QMessageBox.warning(
-                    self, "⚠ Recipe 이름 불일치",
-                    f"표준 Recipe 이름과 일치하지 않는 항목이 있습니다.\n\n"
-                    f"【표준 이름】\n{std_list}\n\n"
-                    f"【감지된 이름】\n{det_list}\n\n"
-                    f"【불일치 항목】\n{mis_list}\n\n"
-                    f"계속 진행하시겠습니까?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                if reply == QMessageBox.No:
-                    self.logger.warn("사용자가 스캔을 취소했습니다 (Recipe 이름 불일치).")
-                    return
+                det_list = '\n'.join(f"  • {d}" for d in [r['name'] for r in self.recipes])
+                mis_list = '\n'.join(f"  ❌ {m}" for m in mismatched)
+                
+                msg = (f"데이터 폴더명이 설정된 Spec 이름과 일치하지 않습니다.\n"
+                       f"정확한 분석 및 Spec 판정을 위해 폴더명을 아래와 같이 변경해 주세요.\n\n"
+                       f"【권장 폴더명 (Spec 설정 기준)】\n{std_list}\n\n"
+                       f"【현재 감지된 폴더명】\n{det_list}\n\n"
+                       f"【불일치 항목】\n{mis_list}")
+                
+                QMessageBox.critical(self, "❌ 폴더명 불일치 오류", msg)
+                self.logger.error("폴더명 불일치로 스캔이 취소되었습니다.")
+                return
 
         self.logger.ok(f"✅ {len(self.recipes)}개 Recipe 발견")
         for r in self.recipes:
@@ -1419,32 +1561,54 @@ class DataAnalyzerApp(QMainWindow):
             for r in raw if extract_die_number(r.get('site_id', '')) is not None))
 
         if set(die_nums_in_data) != set(self._die_checkboxes.keys()):
-            # 기존 체크박스 제거
+            # 기존 체크박스 제거 (접힌 상태)
             while self._die_cb_flow.count():
                 item = self._die_cb_flow.takeAt(0)
                 if item and item.widget():
                     item.widget().deleteLater()
             self._die_checkboxes.clear()
 
-            # 새 체크박스 생성
-            for d in die_nums_in_data:
-                cb = QCheckBox(f"Die {d + 1}")
+            # 기존 체크박스 제거 (펼친 상태 그리드)
+            while self._die_grid_layout.count():
+                item = self._die_grid_layout.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
+            self._die_grid_checkboxes.clear()
+
+            def _make_die_cb(die_idx, hex_color):
+                """Die 체크박스 생성 헬퍼 (공통 스타일)."""
+                cb = QCheckBox(f"Die {die_idx + 1}")
                 cb.setChecked(True)
-                color = _color_from_die(d)
-                # matplotlib color (0-1 float) → hex
-                r_c, g_c, b_c = [int(c * 255) for c in color[:3]]
-                hex_c = f"#{r_c:02x}{g_c:02x}{b_c:02x}"
                 cb.setStyleSheet(f"""
-                    QCheckBox {{ color: {hex_c}; font-size: 8pt; font-weight: bold; border: none; }}
+                    QCheckBox {{ color: {hex_color}; font-size: 8pt; font-weight: bold; border: none; }}
                     QCheckBox::indicator {{ width: 12px; height: 12px; }}
                     QCheckBox::indicator:unchecked {{ border: 1px solid #585b70; border-radius: 2px;
                                                      background: {BG2}; }}
-                    QCheckBox::indicator:checked {{ border: 1px solid {hex_c}; border-radius: 2px;
-                                                   background: {hex_c}; }}
+                    QCheckBox::indicator:checked {{ border: 1px solid {hex_color}; border-radius: 2px;
+                                                   background: {hex_color}; }}
                 """)
-                cb.stateChanged.connect(self._on_die_filter_changed)
-                self._die_cb_flow.addWidget(cb)
-                self._die_checkboxes[d] = cb
+                return cb
+
+            # 새 체크박스 생성 — 접힌 상태(FlowLayout) + 펼친 상태(GridLayout)
+            grid_cols = 2  # 그리드 2열
+            for i, d in enumerate(die_nums_in_data):
+                color = _color_from_die(d)
+                r_c, g_c, b_c = [int(c * 255) for c in color[:3]]
+                hex_c = f"#{r_c:02x}{g_c:02x}{b_c:02x}"
+
+                # 접힌 상태 체크박스
+                cb_flow = _make_die_cb(d, hex_c)
+                cb_flow.stateChanged.connect(self._on_die_filter_changed)
+                self._die_cb_flow.addWidget(cb_flow)
+                self._die_checkboxes[d] = cb_flow
+
+                # 펼친 상태 그리드 체크박스
+                cb_grid = _make_die_cb(d, hex_c)
+                cb_grid.stateChanged.connect(self._on_die_filter_changed)
+                row, col = divmod(i, grid_cols)
+                self._die_grid_layout.addWidget(cb_grid, row, col)
+                self._die_grid_checkboxes[d] = cb_grid
+
 
         # 필터 적용: 체크 해제된 Die 제외
         excluded = {d for d, cb in self._die_checkboxes.items() if not cb.isChecked()}
@@ -1522,7 +1686,7 @@ class DataAnalyzerApp(QMainWindow):
         short = recipe.get('short_name', '')
         sp = spec.get(short, {})
         if not sp:
-            self.logger.warning(f"spec_limits에 '{short}' 키 없음 → Cpk 계산 불가")
+            self.logger.warn(f"spec_limits에 '{short}' 키 없음 → Cpk 계산 불가")
             sp = {'X': {}, 'Y': {}}
         cpk_x = compute_cpk(s_x['mean'], s_x['stdev'],
                             sp.get('X', {}).get('lsl', -5000), sp.get('X', {}).get('usl', 5000))
@@ -1770,12 +1934,143 @@ class DataAnalyzerApp(QMainWindow):
         except Exception as e:
             self.logger.error(f"분포 Y 차트 오류: {e}")
 
+        # Spec Range 가이드 박스용 스펙 가져오기
+        dev_spec = self.settings.get('spec_deviation', {})
+        ds = dev_spec.get(short, {})
+        self._xy_spec_range = ds.get('spec_range', None)
+
         try:
             self.chart_widgets['🎯 XY Scatter'].set_widget(
                 viz_pg.create_scatter_widget(
-                    self._dev_x, self._dev_y, title=f'{short} — XY Scatter'))
+                    self._dev_x, self._dev_y, title=f'{short} — XY Scatter',
+                    log_mode=self._xy_log_mode,
+                    spec_range=self._xy_spec_range))
+            self._rebuild_xy_legend()
         except Exception as e:
             self.logger.error(f"XY Scatter 차트 오류: {e}")
+
+        # 후속 차트 (Pareto, Correlation, 3D, Contour, Vector)
+        self._update_charts_remaining(data, result, recipe)
+
+    def _toggle_xy_log_scale(self):
+        """🎯 XY Scatter Log 스케일 토글."""
+        self._xy_log_mode = self._xy_log_btn.isChecked()
+        if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
+            short = self.recipes[self.current_recipe_idx].get('short_name', '')
+            try:
+                self.chart_widgets['🎯 XY Scatter'].set_widget(
+                    viz_pg.create_scatter_widget(
+                        self._dev_x, self._dev_y,
+                        title=f'{short} — XY Scatter',
+                        log_mode=self._xy_log_mode,
+                        spec_range=getattr(self, '_xy_spec_range', None)))
+                self._rebuild_xy_legend()
+            except Exception as e:
+                self.logger.error(f"XY Scatter Log 토글 오류: {e}")
+
+    def _rebuild_xy_legend(self):
+        """XY Scatter 사이드 범례 패널 재구성."""
+        from visualizer_pg import _DIE_COLORS
+
+        # 기존 버튼 제거
+        while self._xy_legend_btn_layout.count() > 0:
+            item = self._xy_legend_btn_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+        self._xy_legend_buttons.clear()
+        self._xy_highlighted_dies = set()
+
+        # scatter 위젯에서 Die 목록 가져오기
+        scatter_w = self._xy_scatter_chart.get_widget()
+        if scatter_w is None or not hasattr(scatter_w, '_scatter_items'):
+            return
+
+        for scatter, die_label, _, _ in scatter_w._scatter_items:
+            idx = int(die_label.replace('Die', ''))
+            color = _DIE_COLORS[idx % len(_DIE_COLORS)]
+
+            btn = QPushButton(f"■ {die_label}")
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {color};
+                              border: 1px solid transparent; border-radius: 3px;
+                              font-size: 9pt; font-weight: bold; text-align: left;
+                              padding-left: 4px; }}
+                QPushButton:hover {{ border-color: {color}; background: {color}22; }}
+            """)
+            btn.clicked.connect(partial(self._xy_legend_on_die_click, die_label, color))
+            self._xy_legend_btn_layout.addWidget(btn)
+            self._xy_legend_buttons[die_label] = btn
+
+        self._xy_legend_btn_layout.addStretch()
+
+    def _xy_legend_on_die_click(self, die_label, color):
+        """사이드 범례 Die 버튼 클릭 → 하이라이트 토글 (복수 선택)."""
+        scatter_w = self._xy_scatter_chart.get_widget()
+        if scatter_w is None or not hasattr(scatter_w, 'highlight_die'):
+            return
+
+        # scatter 위젯 내부에서 set 토글 + 시각 반영
+        scatter_w.highlight_die(die_label)
+
+        # 범례 상태 동기화
+        if die_label in self._xy_highlighted_dies:
+            self._xy_highlighted_dies.discard(die_label)
+        else:
+            self._xy_highlighted_dies.add(die_label)
+        self._xy_legend_update_styles()
+
+    def _xy_legend_reset(self):
+        """전체 표시 — 모든 Die 복원."""
+        scatter_w = self._xy_scatter_chart.get_widget()
+        if scatter_w and hasattr(scatter_w, '_restore_all'):
+            scatter_w._restore_all()
+        self._xy_highlighted_dies = set()
+        self._xy_legend_update_styles()
+
+    def _xy_legend_update_styles(self):
+        """범례 버튼 스타일 갱신 — 하이라이트된 Die 강조."""
+        from visualizer_pg import _DIE_COLORS
+        for die_label, btn in self._xy_legend_buttons.items():
+            idx = int(die_label.replace('Die', ''))
+            color = _DIE_COLORS[idx % len(_DIE_COLORS)]
+
+            if not self._xy_highlighted_dies:
+                # 전체 표시
+                btn.setStyleSheet(f"""
+                    QPushButton {{ background: transparent; color: {color};
+                                  border: 1px solid transparent; border-radius: 3px;
+                                  font-size: 9pt; font-weight: bold; text-align: left;
+                                  padding-left: 4px; }}
+                    QPushButton:hover {{ border-color: {color}; background: {color}22; }}
+                """)
+            elif die_label in self._xy_highlighted_dies:
+                # 강조
+                btn.setStyleSheet(f"""
+                    QPushButton {{ background: {color}33; color: {color};
+                                  border: 2px solid {color}; border-radius: 3px;
+                                  font-size: 9pt; font-weight: bold; text-align: left;
+                                  padding-left: 4px; }}
+                """)
+            else:
+                # 비활성
+                btn.setStyleSheet(f"""
+                    QPushButton {{ background: transparent; color: #555;
+                                  border: 1px solid transparent; border-radius: 3px;
+                                  font-size: 9pt; text-align: left;
+                                  padding-left: 4px; }}
+                    QPushButton:hover {{ border-color: #555; }}
+                """)
+
+
+    # ──────────────────────────────────────────────
+    # _update_charts 후속 — Pareto / Correlation / 3D / Contour / Vector
+    # ──────────────────────────────────────────────
+    def _update_charts_remaining(self, data, result, recipe):
+        """_update_charts에서 분리된 후속 차트 갱신."""
+        import matplotlib.pyplot as plt
+        short = recipe.get('short_name', '')
 
         # ─── Pareto Chart (이상치 분석) ───
         try:
@@ -1808,7 +2103,7 @@ class DataAnalyzerApp(QMainWindow):
                 self.logger.error(f"3D {axis_key} Surface 오류: {e}")
 
         # ─── matplotlib 차트 (Contour/Vector — scipy 보간) ───
-        wr = self._get_wafer_radius_um()  # 웨이퍼 반경 (µm)
+        wr = self._get_wafer_radius_um()
         dyn = getattr(self, '_dynamic_die_positions', None)
 
         try:
@@ -1851,6 +2146,7 @@ class DataAnalyzerApp(QMainWindow):
         except Exception as e:
             self.logger.error(f"Vector Map 차트 오류: {e}")
 
+
     def _render_die_position(self):
         dyn = getattr(self, '_dynamic_die_positions', None)
         self.chart_widgets['Die Position'].set_figure(
@@ -1874,9 +2170,28 @@ class DataAnalyzerApp(QMainWindow):
             self._display_result(result, recipe)
 
     def _on_die_filter_changed(self, state):
-        """개별 Die 체크박스 변경 → 재분석."""
+        """개별 Die 체크박스 변경 → 양쪽 동기화 + 재분석."""
         if self._die_filter_updating:
             return
+        self._die_filter_updating = True
+
+        # 변경된 체크박스가 어느 쪽인지 판별하여 반대쪽 동기화
+        sender = self.sender() if hasattr(self, 'sender') else None
+        for d, cb_flow in self._die_checkboxes.items():
+            cb_grid = self._die_grid_checkboxes.get(d)
+            if cb_grid is None:
+                continue
+            if sender is cb_flow:
+                cb_grid.setChecked(cb_flow.isChecked())
+            elif sender is cb_grid:
+                cb_flow.setChecked(cb_grid.isChecked())
+
+        self._die_filter_updating = False
+
+        # 미니 맵 갱신 (펼친 상태인 경우)
+        if self._die_filter_expanded:
+            self._render_mini_die_map()
+
         if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
             result = self.recipe_results[self.current_recipe_idx]
             recipe = self.recipes[self.current_recipe_idx]
@@ -1887,7 +2202,11 @@ class DataAnalyzerApp(QMainWindow):
         self._die_filter_updating = True
         for cb in self._die_checkboxes.values():
             cb.setChecked(True)
+        for cb in self._die_grid_checkboxes.values():
+            cb.setChecked(True)
         self._die_filter_updating = False
+        if self._die_filter_expanded:
+            self._render_mini_die_map()
         self._on_die_filter_changed(None)
 
     def _die_filter_exclude_stabilization(self):
@@ -1902,14 +2221,93 @@ class DataAnalyzerApp(QMainWindow):
         if first_die is None:
             return
 
-        # 먼저 전체 선택 후, 안정화 Die만 해제
+        # 먼저 전체 선택 후, 안정화 Die만 해제 (양쪽 모두)
         self._die_filter_updating = True
         for cb in self._die_checkboxes.values():
             cb.setChecked(True)
+        for cb in self._die_grid_checkboxes.values():
+            cb.setChecked(True)
         if first_die in self._die_checkboxes:
             self._die_checkboxes[first_die].setChecked(False)
+        if first_die in self._die_grid_checkboxes:
+            self._die_grid_checkboxes[first_die].setChecked(False)
         self._die_filter_updating = False
+        if self._die_filter_expanded:
+            self._render_mini_die_map()
         self._on_die_filter_changed(None)
+
+    # ──────────────────────────────────────────────
+    # Die 필터 확장 토글
+    # ──────────────────────────────────────────────
+    def _toggle_die_filter_expand(self):
+        """Die 필터 접힘/펼침 토글."""
+        self._die_filter_expanded = not self._die_filter_expanded
+        if self._die_filter_expanded:
+            self._die_expand_btn.setText("▲")
+            self._die_expand_btn.setToolTip("Die 필터 접기")
+            self._die_cb_container.setVisible(False)
+            self._die_expanded_panel.setVisible(True)
+            self._render_mini_die_map()
+        else:
+            self._die_expand_btn.setText("▼")
+            self._die_expand_btn.setToolTip("Die 필터 확장 — 포지션 맵과 함께 보기")
+            self._die_cb_container.setVisible(True)
+            self._die_expanded_panel.setVisible(False)
+
+    def _render_mini_die_map(self):
+        """미니 Die Position Map 렌더링 (확장 패널 좌측)."""
+        import matplotlib.pyplot as plt
+
+        # 체크 해제된 Die 수집
+        excluded = {d for d, cb in self._die_checkboxes.items() if not cb.isChecked()}
+        dyn = getattr(self, '_dynamic_die_positions', None)
+
+        fig, scatter_map = viz.plot_die_position_map_mini(
+            dynamic_positions=dyn,
+            wafer_radius_um=self._get_wafer_radius_um(),
+            excluded_dies=excluded)
+        self._mini_die_scatter_map = scatter_map
+
+        # 기존 캔버스 교체
+        if self._mini_map_canvas is not None:
+            self._mini_map_layout.removeWidget(self._mini_map_canvas)
+            self._mini_map_canvas.setParent(None)
+            old_fig = self._mini_map_canvas.figure
+            self._mini_map_canvas.deleteLater()
+            plt.close(old_fig)
+
+        canvas = FigureCanvasQTAgg(fig)
+        canvas.setStyleSheet("border: none;")
+        self._mini_map_layout.addWidget(canvas)
+        self._mini_map_canvas = canvas
+
+        # pick_event 연결 — Die 원 클릭 시 체크박스 토글
+        canvas.mpl_connect('pick_event', self._on_mini_map_pick)
+
+    def _on_mini_map_pick(self, event):
+        """미니 맵에서 Die 원 클릭 → 체크박스 토글."""
+        artist = event.artist
+        # scatter_map에서 어떤 Die인지 찾기
+        for die_idx, sc in self._mini_die_scatter_map.items():
+            if sc is artist:
+                # 해당 Die 체크박스 토글 (양쪽)
+                cb_flow = self._die_checkboxes.get(die_idx)
+                cb_grid = self._die_grid_checkboxes.get(die_idx)
+                if cb_flow:
+                    new_state = not cb_flow.isChecked()
+                    self._die_filter_updating = True
+                    cb_flow.setChecked(new_state)
+                    if cb_grid:
+                        cb_grid.setChecked(new_state)
+                    self._die_filter_updating = False
+                    # 미니 맵 갱신 + 재분석
+                    self._render_mini_die_map()
+                    if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
+                        result = self.recipe_results[self.current_recipe_idx]
+                        recipe = self.recipes[self.current_recipe_idx]
+                        self._display_result(result, recipe)
+                break
+
 
     # ──────────────────────────────────────────────
     # Lot Trend Filter (Die 필터와 독립)

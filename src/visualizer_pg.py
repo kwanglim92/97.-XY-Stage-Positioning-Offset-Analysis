@@ -37,14 +37,26 @@ pg.setConfigOptions(
     antialias=True,
 )
 
-# Die별 고유 색상 팔레트 (21 Dies)
-_DIE_COLORS = [
-    '#f38ba8', '#fab387', '#f9e2af', '#a6e3a1', '#94e2d5',
-    '#89dceb', '#74c7ec', '#89b4fa', '#b4befe', '#cba6f7',
-    '#f5c2e7', '#eba0ac', '#f2cdcd', '#f5e0dc', '#e6c384',
-    '#7dc4e4', '#8aadf4', '#c6a0f6', '#ee99a0', '#a6da95',
-    '#8bd5ca',
-]
+# Die별 고유 색상 팔레트 — visualizer.py의 _color_from_die와 동일 HSL 알고리즘
+def _gen_die_colors(total=21):
+    """Die Position Map / Die 필터와 동일한 HSL 기반 색상 생성."""
+    colors = []
+    for i in range(total):
+        hue = (i % total) * (360.0 / total)
+        # HSL → RGB (S=0.6, L=0.5)
+        c = (1 - abs(2 * 0.5 - 1)) * 0.6
+        x = c * (1 - abs((hue / 60) % 2 - 1))
+        m = 0.5 - c / 2
+        if hue < 60:    r, g, b = c, x, 0
+        elif hue < 120: r, g, b = x, c, 0
+        elif hue < 180: r, g, b = 0, c, x
+        elif hue < 240: r, g, b = 0, x, c
+        elif hue < 300: r, g, b = x, 0, c
+        else:            r, g, b = c, 0, x
+        colors.append(f'#{int((r+m)*255):02x}{int((g+m)*255):02x}{int((b+m)*255):02x}')
+    return colors
+
+_DIE_COLORS = _gen_die_colors(21)
 
 
 def _make_pen(color, width=2, style=None):
@@ -294,11 +306,16 @@ def create_dual_trend_widget(x_trend: list, y_trend: list,
 # ═══════════════════════════════════════════════
 
 class HoverScatterWidget(pg.PlotWidget):
-    """마우스 호버 시 가장 가까운 점의 정보를 표시하는 ScatterPlot."""
+    """마우스 호버 시 가장 가까운 점의 정보를 표시하는 ScatterPlot.
+    
+    Die 점 클릭 시 해당 Die만 강조 (나머지 투명화).
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._scatter_items = []  # (ScatterPlotItem, die_label) 리스트
+        self._scatter_items = []  # (ScatterPlotItem, die_label, x, y) 리스트
+        self._die_colors = {}  # {die_label: original_color_hex}
+        self._highlighted_dies = set()  # 강조된 Die 세트 (비어있으면 전체 표시)
         self._tooltip = pg.TextItem(anchor=(0, 1), color=FG,
                                      fill=pg.mkBrush(BG3 + 'DD'))
         self._tooltip.setFont(QFont('Consolas', 9))
@@ -322,6 +339,41 @@ class HoverScatterWidget(pg.PlotWidget):
                                       name=die_label)
         self.addItem(scatter)
         self._scatter_items.append((scatter, die_label, x, y))
+        self._die_colors[die_label] = color
+
+    def highlight_die(self, die_label):
+        """외부에서 호출 — Die 토글 (복수 선택 가능)."""
+        if die_label in self._highlighted_dies:
+            self._highlighted_dies.discard(die_label)
+        else:
+            self._highlighted_dies.add(die_label)
+
+        if not self._highlighted_dies:
+            self._restore_all()
+        else:
+            self._apply_highlight()
+
+    def _apply_highlight(self):
+        """_highlighted_dies에 속한 Die만 강조, 나머지 투명화."""
+        for scatter, die_label, _, _ in self._scatter_items:
+            if die_label in self._highlighted_dies:
+                color = self._die_colors[die_label]
+                scatter.setBrush(pg.mkBrush(color + 'CC'))
+                scatter.setSize(10)
+                scatter.setZValue(10)
+            else:
+                scatter.setBrush(pg.mkBrush('#555555' + '14'))
+                scatter.setSize(6)
+                scatter.setZValue(1)
+
+    def _restore_all(self):
+        """모든 Die를 원래 상태로 복원."""
+        self._highlighted_dies.clear()
+        for scatter, die_label, _, _ in self._scatter_items:
+            color = self._die_colors[die_label]
+            scatter.setBrush(pg.mkBrush(color + 'CC'))
+            scatter.setSize(8)
+            scatter.setZValue(5)
 
     def _on_mouse_moved(self, pos):
         if not self.sceneBoundingRect().contains(pos):
@@ -334,6 +386,9 @@ class HoverScatterWidget(pg.PlotWidget):
         min_dist_sq = float('inf')
         closest = None
         for scatter, die_label, xs, ys in self._scatter_items:
+            # 투명화된 Die는 호버 대상 제외
+            if self._highlighted_dies and die_label not in self._highlighted_dies:
+                continue
             for x, y in zip(xs, ys):
                 d = (x - mx) ** 2 + (y - my) ** 2
                 if d < min_dist_sq:
@@ -352,18 +407,32 @@ class HoverScatterWidget(pg.PlotWidget):
             self._highlight.setData([], [])
 
 
+
 def create_scatter_widget(x_dev_result: dict, y_dev_result: dict,
-                           title: str = 'XY Scatter') -> HoverScatterWidget:
+                           title: str = 'XY Scatter',
+                           log_mode: bool = False,
+                           spec_range: float = None) -> HoverScatterWidget:
     """X/Y Deviation Die별 산점도 — pyqtgraph 인터랙티브 버전.
 
     Features:
       - Die별 고유 색상
       - 마우스 호버 → Die명, X/Y 값 표시
       - ±5µm 격자 + Zero 십자선
+      - 범례 패널에서 Die 하이라이트 (복수 선택)
+      - log_mode: Signed Log 변환 (sign × log₁₀(1 + |value|))
+      - spec_range: Range spec 가이드 박스 (±range 사각형)
     """
+    def _signed_log(v):
+        """Signed Log 변환: 부호 유지 + log 스케일."""
+        return np.sign(v) * np.log10(1 + np.abs(v))
+
     w = HoverScatterWidget()
     plot = w.plotItem
-    _style_axis(plot, title=title, x_label='X Offset (µm)', y_label='Y Offset (µm)')
+
+    x_suffix = ' (Signed Log)' if log_mode else ' (µm)'
+    _style_axis(plot, title=title,
+                x_label=f'X Offset{x_suffix}',
+                y_label=f'Y Offset{x_suffix}')
 
     die_labels = x_dev_result.get('die_labels', [])
     repeat_labels = x_dev_result.get('repeat_labels', [])
@@ -381,23 +450,48 @@ def create_scatter_widget(x_dev_result: dict, y_dev_result: dict,
                 xvals.append(xv)
                 yvals.append(yv)
         if xvals:
-            w.add_die_scatter(np.array(xvals), np.array(yvals), dl, color)
+            xa = np.array(xvals)
+            ya = np.array(yvals)
+            if log_mode:
+                xa = _signed_log(xa)
+                ya = _signed_log(ya)
+            w.add_die_scatter(xa, ya, dl, color)
+
+    # Spec Range 가이드 박스
+    if spec_range is not None and spec_range > 0:
+        sr = spec_range
+        if log_mode:
+            sr = float(np.sign(sr) * np.log10(1 + abs(sr)))
+        from pyqtgraph import QtWidgets, QtCore, QtGui
+        rect = QtWidgets.QGraphicsRectItem(-sr, -sr, sr * 2, sr * 2)
+        rect.setPen(pg.mkPen('#ff6b6b', width=1.5, style=QtCore.Qt.DashLine))
+        rect.setBrush(pg.mkBrush('#ff6b6b08'))  # 매우 미세한 fill
+        rect.setZValue(2)  # 데이터(5~10) 뒤, 십자선(기본) 앞
+        w.addItem(rect, ignoreBounds=True)
+
+        # 라벨
+        spec_label = pg.TextItem(
+            f'Spec ±{spec_range}µm', color='#ff6b6b',
+            anchor=(1, 1))
+        spec_label.setFont(QFont('Consolas', 8))
+        spec_label.setPos(sr, sr)
+        spec_label.setZValue(2)
+        w.addItem(spec_label, ignoreBounds=True)
 
     # Zero 십자선
     w.addItem(pg.InfiniteLine(pos=0, angle=0, pen=_make_pen('#45475a', 1, 'dash')))
     w.addItem(pg.InfiniteLine(pos=0, angle=90, pen=_make_pen('#45475a', 1, 'dash')))
 
-    # ±5µm 범위
-    plot.setXRange(-5, 5)
-    plot.setYRange(-5, 5)
+    # 범위 설정
+    if log_mode:
+        plot.enableAutoRange()
+    else:
+        plot.setXRange(-5, 5)
+        plot.setYRange(-5, 5)
     plot.setAspectLocked(True)
 
-    # Legend
-    plot.addLegend(offset=(10, 10), labelTextColor=FG2,
-                    brush=pg.mkBrush(BG3 + 'AA'),
-                    colCount=3)
-
     return w
+
 
 
 # ═══════════════════════════════════════════════

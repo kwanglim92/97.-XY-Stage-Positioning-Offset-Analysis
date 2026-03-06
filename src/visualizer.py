@@ -447,6 +447,12 @@ def _color_from_die(die_idx, total=21):
     return _hsl_to_rgb(hue, 0.6, 0.5)
 
 
+def _color_from_die_hex(die_idx, total=21):
+    """Die 인덱스 → '#RRGGBB' hex 문자열 (pyqtgraph/Qt 호환)."""
+    r, g, b = _color_from_die(die_idx, total)
+    return f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}'
+
+
 def plot_wafer_contour(die_stats: list, title: str = 'Wafer Contour',
                        vmin: float = 0.0, vmax: float = 1.0,
                        wafer_radius_um: float = 150_000,
@@ -726,6 +732,79 @@ def plot_die_position_map(dynamic_positions: dict = None,
     fig.tight_layout()
     return fig
 
+
+
+def plot_die_position_map_mini(dynamic_positions: dict = None,
+                                wafer_radius_um: float = 150_000,
+                                excluded_dies: set = None) -> tuple:
+    """Die Position Map 미니 버전 — Die 필터 확장 패널용.
+
+    - 범례, 축 라벨, 측정 순서 화살표 제거 (공간 절약)
+    - picker=True → 클릭 이벤트 감지 가능
+    - excluded_dies 내의 Die는 회색 + 반투명으로 표시
+
+    Returns:
+        (fig, die_scatter_map) — die_scatter_map: {die_idx: scatter_artist}
+    """
+    fig, ax = plt.subplots(figsize=(3.5, 3.2))
+    fig.patch.set_facecolor('#262637')
+    ax.set_facecolor('#1e1e2e')
+
+    if excluded_dies is None:
+        excluded_dies = set()
+
+    # 좌표 소스 결정
+    if dynamic_positions:
+        die_indices = sorted(dynamic_positions.keys())
+        positions = [(i, dynamic_positions[i]) for i in die_indices]
+    else:
+        positions = [(i, pos) for i, pos in enumerate(DIE_POSITIONS)]
+
+    # mm → µm
+    positions_um = [(idx, (x * 1000, y * 1000)) for idx, (x, y) in positions]
+
+    # 웨이퍼 경계 원
+    from matplotlib.patches import Circle
+    wafer_circle = Circle((0, 0), wafer_radius_um, fill=False,
+                           edgecolor='#555', linewidth=1, linestyle='--', alpha=0.4)
+    ax.add_patch(wafer_circle)
+
+    # Die 마커 + 번호
+    die_scatter_map = {}  # {die_idx: scatter_artist}
+    for die_idx, (x, y) in positions_um:
+        is_excluded = die_idx in excluded_dies
+        if is_excluded:
+            c = '#555555'
+            alpha = 0.35
+            edge_color = '#444'
+            text_color = '#666'
+        else:
+            c = _color_from_die(die_idx)
+            alpha = 1.0
+            edge_color = 'white'
+            text_color = 'white'
+
+        sc = ax.scatter(x, y, c=[c], s=280, zorder=5, alpha=alpha,
+                        edgecolors=edge_color, linewidths=0.5,
+                        picker=True, pickradius=8)
+        ax.annotate(str(die_idx + 1), (x, y), ha='center', va='center',
+                    fontsize=7, fontweight='bold', color=text_color,
+                    alpha=alpha, zorder=6)
+        die_scatter_map[die_idx] = sc
+
+    # 축 범위 — 웨이퍼 반경 기준 (간소화)
+    ax.set_xlim(-wafer_radius_um * 1.08, wafer_radius_um * 1.08)
+    ax.set_ylim(-wafer_radius_um * 1.08, wafer_radius_um * 1.08)
+    ax.set_aspect('equal')
+    ax.set_title(f'Die Position ({len(positions_um)})',
+                 color='#89b4fa', fontsize=9, pad=4)
+    ax.tick_params(colors='#555', labelsize=6)
+    for s in ax.spines.values():
+        s.set_color('#363650')
+    ax.grid(True, alpha=0.1, color='#444')
+
+    fig.tight_layout(pad=0.5)
+    return fig, die_scatter_map
 
 
 def plot_vector_map(x_die_stats: list, y_die_stats: list,

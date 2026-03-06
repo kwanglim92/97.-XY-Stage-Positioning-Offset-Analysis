@@ -42,32 +42,30 @@ def scan_recipes(root_path: str) -> list:
         if not os.path.isdir(recipe_path):
             continue
 
-        # 하위에 1st/2nd 또는 직접 Lot 폴더가 있는지 확인
+        # 1차: Recipe 폴더 바로 아래에 Lot 폴더가 있는지 확인 (플랫 구조)
+        #      서버 데이터: Recipe/Lot102, Recipe/Lot103, ...
         rounds = []
-        sub_items = sorted(os.listdir(recipe_path))
-
-        for sub in sub_items:
-            sub_path = os.path.join(recipe_path, sub)
-            if not os.path.isdir(sub_path):
-                continue
-
-            lots = scan_lot_folders(sub_path)
-            if lots:
-                rounds.append({
-                    'name': sub,
-                    'path': sub_path,
-                    'lot_count': len(lots),
-                })
-
-        # 라운드가 없으면 직접 Lot 검색
-        if not rounds:
-            lots = scan_lot_folders(recipe_path)
-            if lots:
-                rounds.append({
-                    'name': '(root)',
-                    'path': recipe_path,
-                    'lot_count': len(lots),
-                })
+        direct_lots = scan_lot_folders(recipe_path)
+        if direct_lots:
+            rounds.append({
+                'name': '(root)',
+                'path': recipe_path,
+                'lot_count': len(direct_lots),
+            })
+        else:
+            # 2차: 하위에 1st/2nd 라운드 폴더가 있는지 확인
+            sub_items = sorted(os.listdir(recipe_path))
+            for sub in sub_items:
+                sub_path = os.path.join(recipe_path, sub)
+                if not os.path.isdir(sub_path):
+                    continue
+                lots = scan_lot_folders(sub_path)
+                if lots:
+                    rounds.append({
+                        'name': sub,
+                        'path': sub_path,
+                        'lot_count': len(lots),
+                    })
 
         if rounds:
             # 인덱스 추출 (폴더명 앞의 숫자)
