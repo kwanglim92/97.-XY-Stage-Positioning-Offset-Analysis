@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QMessageBox, QFrame, QDialog, QComboBox, QSlider, QToolTip, QCheckBox, QInputDialog,
     QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
-    QListWidget, QTextBrowser, QDialogButtonBox,
+    QListWidget, QTextBrowser, QDialogButtonBox, QStyle,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
@@ -517,7 +517,7 @@ def _contrast_fg(bg: QColor) -> QColor:
 class GuideDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("📖 데이터 분석 가이드 (도움말)")
+        self.setWindowTitle("Analysis Guide")
         self.resize(1000, 700)
         self.setStyleSheet(f"background: {BG}; color: {FG}; font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;")
 
@@ -765,7 +765,7 @@ class DataAnalyzerApp(QMainWindow):
         btn_browse.clicked.connect(self._browse_folder)
         top.addWidget(btn_browse)
 
-        btn_scan = QPushButton("🔄 Scan & Analysis")
+        btn_scan = QPushButton("Scan & Analysis")
         btn_scan.setProperty("accent", True)
         btn_scan.clicked.connect(self._scan_folder)
         top.addWidget(btn_scan)
@@ -827,7 +827,7 @@ class DataAnalyzerApp(QMainWindow):
         cards.addWidget(self.card_y)
         left_layout.addLayout(cards)
 
-        btn_spec = QPushButton("⚙️ Spec 설정")
+        btn_spec = QPushButton("⚙️ Spec Config")
         btn_spec.clicked.connect(self._open_spec_config)
         left_layout.addWidget(btn_spec, alignment=Qt.AlignRight)
 
@@ -837,7 +837,7 @@ class DataAnalyzerApp(QMainWindow):
 
         # Tab 1: System Log
         log_widget = QTextEdit()
-        self.main_tabs.addTab(log_widget, "📝 시스템 로그")
+        self.main_tabs.addTab(log_widget, "System Log")
         self.logger = SystemLogger(log_widget)
 
         # Tab 2: Data Table Hub
@@ -860,23 +860,25 @@ class DataAnalyzerApp(QMainWindow):
         # 헤더 행: 타이틀 + ▼/▲ 토글 + 전체 선택 + 안정화 제외 + 정보
         filter_header = QHBoxLayout()
         filter_header.setSpacing(8)
-        lbl_filter = QLabel("Die 필터")
+        lbl_filter = QLabel("Die Filter")
         lbl_filter.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold; border: none;")
         filter_header.addWidget(lbl_filter)
 
-        # ▼/▲ 토글 버튼
-        self._die_expand_btn = QPushButton("▼")
+        # Toggle button (expand/collapse)
+        self._die_expand_btn = QPushButton()
+        self._die_expand_btn.setIcon(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_ArrowDown))
+        self._die_expand_btn.setIconSize(QSize(14, 14))
         self._die_expand_btn.setFixedSize(24, 22)
         self._die_expand_btn.setToolTip("Die 필터 확장 — 포지션 맵과 함께 보기")
         self._die_expand_btn.setStyleSheet(f"""
-            QPushButton {{ background: {BG3}; color: {ACCENT}; border: none;
-                          border-radius: 3px; font-size: 10pt; font-weight: bold; }}
-            QPushButton:hover {{ background: {ACCENT}; color: white; }}
+            QPushButton {{ background: {BG3}; border: none; border-radius: 3px; }}
+            QPushButton:hover {{ background: {ACCENT}; }}
         """)
         self._die_expand_btn.clicked.connect(self._toggle_die_filter_expand)
         filter_header.addWidget(self._die_expand_btn)
 
-        self.die_select_all_btn = QPushButton("✅ 전체 선택")
+        self.die_select_all_btn = QPushButton("✅ Select All")
         self.die_select_all_btn.setFixedHeight(22)
         self.die_select_all_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {FG2}; border: none;
@@ -886,7 +888,7 @@ class DataAnalyzerApp(QMainWindow):
         self.die_select_all_btn.clicked.connect(self._die_filter_select_all)
         filter_header.addWidget(self.die_select_all_btn)
 
-        self.die_stab_btn = QPushButton("🚫 안정화 Die 제외")
+        self.die_stab_btn = QPushButton("🚫 Exclude Stabilization Die")
         self.die_stab_btn.setFixedHeight(22)
         self.die_stab_btn.setToolTip(
             "처음 측정된 Die를 자동으로 체크 해제합니다.\n"
@@ -951,11 +953,11 @@ class DataAnalyzerApp(QMainWindow):
         self._mini_die_scatter_map = {}  # {die_idx: scatter_artist}
 
         data_layout.addWidget(die_filter_frame)
-        self.main_tabs.addTab(data_widget, "🗄️ 데이터 테이블")
+        self.main_tabs.addTab(data_widget, "Data Table")
 
         # Sub 1: Summary
         self.sum_table = CopyableTable()
-        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', '결과']
+        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', 'Result']
         self.sum_table.setColumnCount(len(cols_s))
         self.sum_table.setHorizontalHeaderLabels(cols_s)
         hdr = self.sum_table.horizontalHeader()
@@ -964,7 +966,7 @@ class DataAnalyzerApp(QMainWindow):
         for col, width in [(1, 70), (2, 35), (8, 30), (9, 30), (10, 30), (11, 30)]:
             hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.sum_table.setColumnWidth(col, width)
-        self.data_tabs.addTab(self.sum_table, "📊 Summary")
+        self.data_tabs.addTab(self.sum_table, "Summary")
 
         # Sub 2: Die 평균 (X/Y sub-tabs)
         die_widget = QWidget()
@@ -976,7 +978,7 @@ class DataAnalyzerApp(QMainWindow):
         self.die_y_table = CopyableTable()
         self.die_tabs.addTab(self.die_x_table, "X Die Average")
         self.die_tabs.addTab(self.die_y_table, "Y Die Average")
-        self.data_tabs.addTab(die_widget, "Die별 평균")
+        self.data_tabs.addTab(die_widget, "Die Average")
 
         # Sub 3: Raw Deviation (X/Y)
         dev_widget = QWidget()
@@ -998,10 +1000,10 @@ class DataAnalyzerApp(QMainWindow):
 
         # 폴더 열기 툴바
         tiff_bar2 = QHBoxLayout()
-        btn_tiff_open = QPushButton("📂 TIFF 폴더 열기")
+        btn_tiff_open = QPushButton("📂 Open TIFF Folder")
         btn_tiff_open.clicked.connect(self._open_tiff_folder)
         tiff_bar2.addWidget(btn_tiff_open)
-        self.tiff_path_label = QLabel("더블클릭 → TIFF 로드")
+        self.tiff_path_label = QLabel("Double-click row → Load TIFF")
         self.tiff_path_label.setStyleSheet(f"color: {FG2}; font-size: 8pt;")
         tiff_bar2.addWidget(self.tiff_path_label, 1)
         raw_bar_w = QWidget()
@@ -1020,7 +1022,7 @@ class DataAnalyzerApp(QMainWindow):
             self.raw_table.setColumnWidth(col, width)
         self.raw_table.cellDoubleClicked.connect(self._on_row_double_click)
         raw_layout.addWidget(self.raw_table, 1)
-        self.data_tabs.addTab(raw_widget, "원본 데이터")
+        self.data_tabs.addTab(raw_widget, "Raw Data")
 
         splitter.addWidget(left)
 
@@ -1068,18 +1070,19 @@ class DataAnalyzerApp(QMainWindow):
 
             toolbar_row = QHBoxLayout()
             toolbar_row.setContentsMargins(8, 4, 8, 0)
-            btn = QPushButton(f"🗺️ Repeat별 Contour ({axis})")
+            btn = QPushButton(f"Repeat Contour ({axis})")
             btn.clicked.connect(partial(self._open_repeat_contour, axis))
             toolbar_row.addWidget(btn)
 
-            help_btn = QPushButton("?")
+            help_btn = QPushButton()
+            help_btn.setIcon(self.style().standardIcon(
+                QStyle.StandardPixmap.SP_MessageBoxInformation))
+            help_btn.setIconSize(QSize(16, 16))
             help_btn.setFixedSize(22, 22)
             help_btn.setCursor(Qt.WhatsThisCursor)
             help_btn.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {FG2};
-                              border: 1px solid #585b70; border-radius: 11px;
-                              font-size: 10pt; font-weight: bold; }}
-                QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+                QPushButton {{ background: transparent; border: none; }}
+                QPushButton:hover {{ background: {BG3}; border-radius: 11px; }}
             """)
             help_btn.setToolTip(_contour_help)
             help_btn.clicked.connect(
@@ -1093,10 +1096,10 @@ class DataAnalyzerApp(QMainWindow):
             cw = ChartWidget()
             container_layout.addWidget(cw, 1)
             self.chart_widgets[axis_name] = cw
-            _add_chart('기본 분석', axis_name, container, register=False)
+            _add_chart('Basic Analysis', axis_name, container, register=False)
 
         for name in ['X*Y Offset', 'Die Position']:
-            _add_chart('기본 분석', name, ChartWidget())
+            _add_chart('Basic Analysis', name, ChartWidget())
 
         # Vector Map (슬라이더 컨트롤 포함)
         vm_container = QWidget()
@@ -1107,10 +1110,7 @@ class DataAnalyzerApp(QMainWindow):
         # 슬라이더 바
         slider_bar = QHBoxLayout()
         slider_bar.setContentsMargins(8, 4, 8, 0)
-        lbl_icon = QLabel("📏")
-        lbl_icon.setStyleSheet(f"color: {FG2}; font-size: 10pt;")
-        slider_bar.addWidget(lbl_icon)
-        lbl_title = QLabel("화살표 배율:")
+        lbl_title = QLabel("Arrow Scale:")
         lbl_title.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
         slider_bar.addWidget(lbl_title)
 
@@ -1146,14 +1146,15 @@ class DataAnalyzerApp(QMainWindow):
             "• 작은 편차가 잘 안 보이면 배율을 높이세요\n\n"
             "예) 300mm 웨이퍼, 10% → 최대 화살표 ≈ 15,000µm\n"
             "예) 300mm 웨이퍼, 30% → 최대 화살표 ≈ 45,000µm")
-        help_btn = QPushButton("?")
+        help_btn = QPushButton()
+        help_btn.setIcon(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_MessageBoxInformation))
+        help_btn.setIconSize(QSize(16, 16))
         help_btn.setFixedSize(22, 22)
         help_btn.setCursor(Qt.WhatsThisCursor)
         help_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {FG2};
-                          border: 1px solid #585b70; border-radius: 11px;
-                          font-size: 10pt; font-weight: bold; }}
-            QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+            QPushButton {{ background: transparent; border: none; }}
+            QPushButton:hover {{ background: {BG3}; border-radius: 11px; }}
         """)
         help_btn.setToolTip(_help_text)
         help_btn.clicked.connect(
@@ -1171,7 +1172,7 @@ class DataAnalyzerApp(QMainWindow):
 
         self.vector_scale_slider.valueChanged.connect(self._on_vector_scale_changed)
 
-        _add_chart('기본 분석', 'Vector Map', vm_container, register=False)
+        _add_chart('Basic Analysis', 'Vector Map', vm_container, register=False)
 
         # 인터랙티브 (pyqtgraph)
         # ─── 📈 Lot 트렌드: 컨테이너 (Lot 필터 + 차트) ───
@@ -1202,14 +1203,15 @@ class DataAnalyzerApp(QMainWindow):
             "  • [이상 Lot 제외] 장비 이상 Lot를 빼고 추세 확인\n"
             "  • [범위 지정] 처음 N개 / 마지막 N개 구간 비교")
 
-        lt_help_btn = QPushButton("?")
+        lt_help_btn = QPushButton()
+        lt_help_btn.setIcon(self.style().standardIcon(
+            QStyle.StandardPixmap.SP_MessageBoxInformation))
+        lt_help_btn.setIconSize(QSize(16, 16))
         lt_help_btn.setFixedSize(22, 22)
         lt_help_btn.setCursor(Qt.WhatsThisCursor)
         lt_help_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {FG2};
-                          border: 1px solid #585b70; border-radius: 11px;
-                          font-size: 10pt; font-weight: bold; }}
-            QPushButton:hover {{ background: {BG3}; color: {ACCENT}; }}
+            QPushButton {{ background: transparent; border: none; }}
+            QPushButton:hover {{ background: {BG3}; border-radius: 11px; }}
         """)
         lt_help_btn.setToolTip(_lot_trend_help)
         lt_help_btn.clicked.connect(
@@ -1218,11 +1220,11 @@ class DataAnalyzerApp(QMainWindow):
                     b.rect().bottomLeft()), t, b, b.rect(), 10000))
         lt_toolbar.addWidget(lt_help_btn)
 
-        lt_lbl = QLabel("Lot 필터")
+        lt_lbl = QLabel("Lot Filter")
         lt_lbl.setStyleSheet(f"color: {ACCENT}; font-size: 9pt; font-weight: bold;")
         lt_toolbar.addWidget(lt_lbl)
 
-        self._lot_select_all_btn = QPushButton("✅ 전체 선택")
+        self._lot_select_all_btn = QPushButton("✅ Select All")
         self._lot_select_all_btn.setFixedHeight(22)
         self._lot_select_all_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {FG2}; border: none;
@@ -1232,7 +1234,7 @@ class DataAnalyzerApp(QMainWindow):
         self._lot_select_all_btn.clicked.connect(self._lot_filter_select_all)
         lt_toolbar.addWidget(self._lot_select_all_btn)
 
-        self._lot_range_btn = QPushButton("범위 지정")
+        self._lot_range_btn = QPushButton("Set Range")
         self._lot_range_btn.setFixedHeight(22)
         self._lot_range_btn.setToolTip(
             "표시할 Lot 범위를 지정합니다.\n"
@@ -1260,8 +1262,8 @@ class DataAnalyzerApp(QMainWindow):
         # 트렌드 차트 위젯
         self._lot_trend_chart = InteractiveChartWidget()
         lt_layout.addWidget(self._lot_trend_chart, 1)
-        self.chart_widgets['📈 Lot 트렌드'] = self._lot_trend_chart
-        _add_chart('인터랙티브', '📈 Lot 트렌드', lot_trend_container, register=False)
+        self.chart_widgets['Lot Trend'] = self._lot_trend_chart
+        _add_chart('Interactive', 'Lot Trend', lot_trend_container, register=False)
 
         # ─── 🎯 XY Scatter: 컨테이너 (툴바 + 차트 + 사이드 범례) ───
         xy_scatter_container = QWidget()
@@ -1279,7 +1281,7 @@ class DataAnalyzerApp(QMainWindow):
         xs_toolbar.addStretch()
 
         # Log 스케일 토글 버튼
-        self._xy_log_btn = QPushButton("📐 Log 스케일")
+        self._xy_log_btn = QPushButton("Log Scale")
         self._xy_log_btn.setCheckable(True)
         self._xy_log_btn.setFixedHeight(22)
         self._xy_log_btn.setStyleSheet(f"""
@@ -1302,7 +1304,7 @@ class DataAnalyzerApp(QMainWindow):
 
         self._xy_scatter_chart = InteractiveChartWidget()
         xs_body.addWidget(self._xy_scatter_chart, 7)
-        self.chart_widgets['🎯 XY Scatter'] = self._xy_scatter_chart
+        self.chart_widgets['XY Scatter'] = self._xy_scatter_chart
 
         # 사이드 범례 패널
         self._xy_legend_panel = QWidget()
@@ -1313,7 +1315,7 @@ class DataAnalyzerApp(QMainWindow):
         legend_vbox.setSpacing(2)
 
         # [전체 표시] 리셋 버튼
-        self._xy_legend_reset_btn = QPushButton("전체 표시")
+        self._xy_legend_reset_btn = QPushButton("Show All")
         self._xy_legend_reset_btn.setFixedHeight(22)
         self._xy_legend_reset_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {ACCENT}; border: none;
@@ -1345,7 +1347,7 @@ class DataAnalyzerApp(QMainWindow):
         self._xy_legend_buttons = {}  # {die_label: QPushButton}
         self._xy_highlighted_dies = set()  # 현재 범례에서 선택된 Die 세트
 
-        _add_chart('인터랙티브', '🎯 XY Scatter', xy_scatter_container, register=False)
+        _add_chart('Interactive', 'XY Scatter', xy_scatter_container, register=False)
 
 
         # ─── 📊 분포: X/Y 서브탭 ───
@@ -1355,20 +1357,20 @@ class DataAnalyzerApp(QMainWindow):
         dist_y = InteractiveChartWidget()
         dist_tabs.addTab(dist_x, 'X')
         dist_tabs.addTab(dist_y, 'Y')
-        self.chart_widgets['📊 분포 X'] = dist_x
-        self.chart_widgets['📊 분포 Y'] = dist_y
-        _add_chart('인터랙티브', '📊 분포', dist_tabs, register=False)
+        self.chart_widgets['Distribution X'] = dist_x
+        self.chart_widgets['Distribution Y'] = dist_y
+        _add_chart('Interactive', 'Distribution', dist_tabs, register=False)
 
         # TIFF
         tiff_cw = InteractiveChartWidget()
         tiff_viewer = viz_pg.create_tiff_widget()
         tiff_cw.set_widget(tiff_viewer)
-        _add_chart('인터랙티브', '🔬 TIFF', tiff_cw)
+        _add_chart('Interactive', 'TIFF', tiff_cw)
         self._tiff_viewer = tiff_viewer
 
         # 고급 분석 (pyqtgraph — Phase 2)
-        for name in ['🔍 Pareto', '🔗 Correlation']:
-            _add_chart('고급 분석', name, InteractiveChartWidget())
+        for name in ['Pareto', 'Correlation']:
+            _add_chart('Advanced', name, InteractiveChartWidget())
 
         # ─── 🌐 3D Surface: X/Y 서브탭 ───
         surface_tabs = QTabWidget()
@@ -1377,13 +1379,13 @@ class DataAnalyzerApp(QMainWindow):
         surface_y = InteractiveChartWidget()
         surface_tabs.addTab(surface_x, 'X')
         surface_tabs.addTab(surface_y, 'Y')
-        self.chart_widgets['🌐 3D X'] = surface_x
-        self.chart_widgets['🌐 3D Y'] = surface_y
-        _add_chart('고급 분석', '🌐 3D Surface', surface_tabs, register=False)
+        self.chart_widgets['3D X'] = surface_x
+        self.chart_widgets['3D Y'] = surface_y
+        _add_chart('Advanced', '3D Surface', surface_tabs, register=False)
 
         # 비교 (matplotlib — Recipe Comparison: 3개 서브탭)
-        for name in ['📊 Boxplot', '📈 Trend', '🗺️ Heatmap']:
-            _add_chart('비교', name, ChartWidget())
+        for name in ['Boxplot', 'Trend', 'Heatmap']:
+            _add_chart('Comparison', name, ChartWidget())
 
         # 📤 Export 탭
         export_widget = QWidget()
@@ -1391,7 +1393,7 @@ class DataAnalyzerApp(QMainWindow):
         export_layout.setContentsMargins(40, 40, 40, 40)
         export_layout.setSpacing(16)
 
-        export_header = QLabel("📤 데이터 내보내기")
+        export_header = QLabel("Data Export")
         export_header.setStyleSheet(f"color:{ACCENT}; font-size:16pt; font-weight:bold;")
         export_header.setAlignment(Qt.AlignCenter)
         export_layout.addWidget(export_header)
@@ -1404,7 +1406,7 @@ class DataAnalyzerApp(QMainWindow):
 
         export_desc_layout.addStretch()
 
-        btn_guide = QPushButton("📖 분석 가이드 보기")
+        btn_guide = QPushButton("Analysis Guide")
         btn_guide.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {ACCENT}; border: 1px solid {BG3};
                           border-radius: 4px; font-size: 10pt; font-weight: bold; padding: 8px 16px; }}
@@ -1419,9 +1421,9 @@ class DataAnalyzerApp(QMainWindow):
         export_layout.addSpacing(10)
 
         export_buttons_data = [
-            ('📊 Excel 내보내기', 'Die별 편차, Summary, Raw Data 등\n전체 데이터를 Excel 파일로 저장', self._export_excel, ACCENT),
-            ('💾 CSV 내보내기', 'Raw Data를 CSV 형식으로 저장\n타 프로그램에서 불러오기 용이', self._export_csv, GREEN),
-            ('📄 PDF 보고서', '차트 + 통계 포함 PDF 보고서 생성\n출력 및 공유용', self._export_pdf, RED),
+            ('Excel Export', 'Die별 편차, Summary, Raw Data 등\n전체 데이터를 Excel 파일로 저장', self._export_excel, ACCENT),
+            ('CSV Export', 'Raw Data를 CSV 형식으로 저장\n타 프로그램에서 불러오기 용이', self._export_csv, GREEN),
+            ('PDF Report', '차트 + 통계 포함 PDF 보고서 생성\n출력 및 공유용', self._export_pdf, RED),
         ]
         for text, desc, slot, color in export_buttons_data:
             btn = QPushButton(f"{text}")
@@ -1448,9 +1450,9 @@ class DataAnalyzerApp(QMainWindow):
         # Export 카테고리로 등록 (단일 페이지 — 내부 탭 없음)
         inner_export = QTabWidget()
         inner_export.setDocumentMode(True)
-        inner_export.addTab(export_widget, '내보내기')
-        self._inner_tabs['📤 Export'] = inner_export
-        self.chart_category_tabs.addTab(inner_export, '📤 Export')
+        inner_export.addTab(export_widget, 'Export')
+        self._inner_tabs['Export'] = inner_export
+        self.chart_category_tabs.addTab(inner_export, 'Export')
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 5)
@@ -1470,7 +1472,7 @@ class DataAnalyzerApp(QMainWindow):
         QTimer.singleShot(200, self._render_die_position)
 
         # Boot log
-        QTimer.singleShot(50, lambda: self.logger.head("XY Stage Offset Analyzer v8.0 시작"))
+        QTimer.singleShot(50, lambda: self.logger.head("XY Stage Offset Analyzer v1.0.0 시작"))
         QTimer.singleShot(100, lambda: self.logger.info(
             "폴더를 선택하고 '스캔 & 분석'을 눌러주세요."))
 
@@ -1644,21 +1646,21 @@ class DataAnalyzerApp(QMainWindow):
         # ─── Recipe 비교 차트 렌더링 ───
         if len(self.recipe_results) >= 2:
             try:
-                self.chart_widgets['📊 Boxplot'].set_figure(
+                self.chart_widgets['Boxplot'].set_figure(
                     viz.plot_recipe_comparison_boxplot(self.recipe_results))
                 self.logger.ok("📊 Recipe Boxplot 비교 차트 생성 완료")
             except Exception as e:
                 self.logger.error(f"Boxplot 비교 오류: {e}")
 
             try:
-                self.chart_widgets['📈 Trend'].set_figure(
+                self.chart_widgets['Trend'].set_figure(
                     viz.plot_recipe_comparison_trend(self.recipe_results))
                 self.logger.ok("📈 Recipe Trend 비교 차트 생성 완료")
             except Exception as e:
                 self.logger.error(f"Trend 비교 오류: {e}")
 
             try:
-                self.chart_widgets['🗺️ Heatmap'].set_figure(
+                self.chart_widgets['Heatmap'].set_figure(
                     viz.plot_recipe_comparison_heatmap(self.recipe_results))
                 self.logger.ok("🗺️ Recipe Heatmap 비교 차트 생성 완료")
             except Exception as e:
@@ -1832,12 +1834,12 @@ class DataAnalyzerApp(QMainWindow):
             excluded_names = ', '.join(f'Die {d + 1}' for d in sorted(excluded))
             count_removed = len(raw) - len(data)
             self.filter_info_label.setText(
-                f"⚠ {excluded_names} 제외  |  "
-                f"{count_removed}개 제거 → {len(data)}개 분석 중 "
-                f"(전체 {len(raw)}개)")
+                f"⚠ {excluded_names} excluded  |  "
+                f"{count_removed} removed → Analyzing {len(data)} "
+                f"(Total {len(raw)})")
         else:
             data = raw
-            self.filter_info_label.setText(f"✅ 전체 Die 분석 중 ({len(raw)}개)")
+            self.filter_info_label.setText(f"✅ Analyzing All Dies ({len(raw)})")
 
         self._update_cards(data, recipe)
         self._update_die_avg_tables()    # self._dev_x/y 기반 → Die 필터 적용됨
@@ -1848,8 +1850,8 @@ class DataAnalyzerApp(QMainWindow):
         stats = result.get('statistics', {})
         self.statusBar().showMessage(
             f"Step {recipe['index']}: {recipe['short_name']} — "
-            f"{len(data)}개 ({len(excluded)}개 Die 제외) | "
-            f"이상치: {result.get('outlier_count', 0)}  💡 행 더블클릭 → TIFF")
+            f"{len(data)} ({len(excluded)} Dies excluded) | "
+            f"Outliers: {result.get('outlier_count', 0)}  💡 Double-click row → TIFF")
 
     def _refresh_step_buttons(self):
         """Step 버튼 색상만 갱신 (재귀 없이). _update_cards에서 호출."""
@@ -2139,14 +2141,14 @@ class DataAnalyzerApp(QMainWindow):
 
         try:
             x_data = [r for r in data if r.get('method') == 'X']
-            self.chart_widgets['📊 분포 X'].set_widget(
+            self.chart_widgets['Distribution X'].set_widget(
                 viz_pg.create_histogram_widget(x_data, title=f'{short} X Distribution'))
         except Exception as e:
             self.logger.error(f"분포 X 차트 오류: {e}")
 
         try:
             y_data = [r for r in data if r.get('method') == 'Y']
-            self.chart_widgets['📊 분포 Y'].set_widget(
+            self.chart_widgets['Distribution Y'].set_widget(
                 viz_pg.create_histogram_widget(y_data, title=f'{short} Y Distribution'))
         except Exception as e:
             self.logger.error(f"분포 Y 차트 오류: {e}")
@@ -2157,7 +2159,7 @@ class DataAnalyzerApp(QMainWindow):
         self._xy_spec_range = ds.get('spec_range', None)
 
         try:
-            self.chart_widgets['🎯 XY Scatter'].set_widget(
+            self.chart_widgets['XY Scatter'].set_widget(
                 viz_pg.create_scatter_widget(
                     self._dev_x, self._dev_y, title=f'{short} — XY Scatter',
                     log_mode=self._xy_log_mode,
@@ -2175,7 +2177,7 @@ class DataAnalyzerApp(QMainWindow):
         if self.recipe_results and self.current_recipe_idx < len(self.recipe_results):
             short = self.recipes[self.current_recipe_idx].get('short_name', '')
             try:
-                self.chart_widgets['🎯 XY Scatter'].set_widget(
+                self.chart_widgets['XY Scatter'].set_widget(
                     viz_pg.create_scatter_widget(
                         self._dev_x, self._dev_y,
                         title=f'{short} — XY Scatter',
@@ -2292,7 +2294,7 @@ class DataAnalyzerApp(QMainWindow):
         # ─── Pareto Chart (이상치 분석) ───
         try:
             pareto = compute_pareto_data(data, group_by='die')
-            self.chart_widgets['🔍 Pareto'].set_widget(
+            self.chart_widgets['Pareto'].set_widget(
                 viz_pg.create_pareto_widget(pareto, title=f'{short} — Pareto'))
         except Exception as e:
             self.logger.error(f"Pareto 차트 오류: {e}")
@@ -2302,7 +2304,7 @@ class DataAnalyzerApp(QMainWindow):
             if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
                 corr = compute_correlation(
                     self._dev_x['die_stats'], self._dev_y['die_stats'])
-                self.chart_widgets['🔗 Correlation'].set_widget(
+                self.chart_widgets['Correlation'].set_widget(
                     viz_pg.create_correlation_widget(
                         corr, title=f'{short} — X/Y Correlation'))
         except Exception as e:
@@ -2313,7 +2315,7 @@ class DataAnalyzerApp(QMainWindow):
             try:
                 ds = dev.get('die_stats')
                 if ds:
-                    self.chart_widgets[f'🌐 3D {axis_key}'].set_widget(
+                    self.chart_widgets[f'3D {axis_key}'].set_widget(
                         viz_pg.create_3d_surface_widget(
                             ds, title=f'{short} — 3D {axis_key} Surface'))
             except Exception as e:
@@ -2460,13 +2462,15 @@ class DataAnalyzerApp(QMainWindow):
         """Die 필터 접힘/펼침 토글."""
         self._die_filter_expanded = not self._die_filter_expanded
         if self._die_filter_expanded:
-            self._die_expand_btn.setText("▲")
+            self._die_expand_btn.setIcon(self.style().standardIcon(
+                QStyle.StandardPixmap.SP_ArrowUp))
             self._die_expand_btn.setToolTip("Die 필터 접기")
             self._die_cb_container.setVisible(False)
             self._die_expanded_panel.setVisible(True)
             self._render_mini_die_map()
         else:
-            self._die_expand_btn.setText("▼")
+            self._die_expand_btn.setIcon(self.style().standardIcon(
+                QStyle.StandardPixmap.SP_ArrowDown))
             self._die_expand_btn.setToolTip("Die 필터 확장 — 포지션 맵과 함께 보기")
             self._die_cb_container.setVisible(True)
             self._die_expanded_panel.setVisible(False)
@@ -2566,7 +2570,7 @@ class DataAnalyzerApp(QMainWindow):
                 self._lot_checkboxes[name] = cb
             self._lot_filter_updating = False
 
-        self._lot_filter_info.setText(f"✅ 전체 Lot ({len(lot_names)}개)")
+        self._lot_filter_info.setText(f"✅ Total Lot ({len(lot_names)})")
         self._render_lot_trend_chart()
 
     def _render_lot_trend_chart(self):
@@ -2594,9 +2598,9 @@ class DataAnalyzerApp(QMainWindow):
         excluded = total - shown
         if excluded > 0:
             self._lot_filter_info.setText(
-                f"⚠ {excluded}개 Lot 제외 → {shown}개 표시 (전체 {total}개)")
+                f"⚠ {excluded} Lots excluded → Showing {shown} (Total {total})")
         else:
-            self._lot_filter_info.setText(f"✅ 전체 Lot ({total}개)")
+            self._lot_filter_info.setText(f"✅ Total Lot ({total})")
 
     def _on_lot_filter_changed(self, state=None):
         """개별 Lot 체크박스 변경 → 트렌드 재렌더링."""
@@ -2619,11 +2623,11 @@ class DataAnalyzerApp(QMainWindow):
     def _lot_filter_range(self):
         """범위 지정 다이얼로그 — Lot 인덱스 범위로 체크박스 설정."""
         text, ok = QInputDialog.getText(
-            self, "Lot 범위 지정",
-            "표시할 Lot 범위를 입력하세요:\n\n"
-            "  1-5     → 처음 5개 Lot\n"
-            "  -3      → 마지막 3개 Lot\n"
-            "  3-7     → 3번째 ~ 7번째 Lot\n",
+            self, "Lot Range",
+            "Enter Lot range to display:\n\n"
+            "  1-5     → First 5 Lots\n"
+            "  -3      → Last 3 Lots\n"
+            "  3-7     → Lot 3 ~ Lot 7\n",
             text="1-5")
         if not ok or not text.strip():
             return
@@ -2994,13 +2998,13 @@ class DataAnalyzerApp(QMainWindow):
         from PySide6.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QDialogButtonBox
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("⚙️ Spec 설정 현황")
+        dlg.setWindowTitle("⚙️ Spec Configuration")
         dlg.setMinimumSize(600, 480)
         dlg.setStyleSheet(f"background: {BG}; color: {FG};")
         layout = QVBoxLayout(dlg)
 
         # spec_deviation 테이블
-        lbl_dev = QLabel("📊 Deviation Spec (판정 기준)")
+        lbl_dev = QLabel("Deviation Spec")
         lbl_dev.setStyleSheet(f"font-size: 11pt; font-weight: bold; color: {ACCENT};")
         layout.addWidget(lbl_dev)
 
@@ -3017,7 +3021,7 @@ class DataAnalyzerApp(QMainWindow):
         layout.addWidget(t_dev)
 
         # spec_limits 테이블
-        lbl_lim = QLabel("📌 Offset Limits (Cpk 기준)")
+        lbl_lim = QLabel("Offset Limits (Cpk)")
         lbl_lim.setStyleSheet(f"font-size: 11pt; font-weight: bold; color: {ACCENT}; margin-top: 8px;")
         layout.addWidget(lbl_lim)
 

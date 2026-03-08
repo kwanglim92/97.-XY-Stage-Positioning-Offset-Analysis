@@ -716,7 +716,7 @@ class MultiTiffViewerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._header = QLabel("🔬 TIFF — 더블클릭으로 로드")
+        self._header = QLabel("TIFF — Double-click row to load")
         self._header.setStyleSheet(
             f"color: {FG2}; font-size: 9pt; padding: 4px; background: {BG3};")
         layout.addWidget(self._header)
@@ -743,7 +743,7 @@ class MultiTiffViewerWidget(QWidget):
         self.clear()
 
         n = len(tiff_results)
-        self._header.setText(f"🔬 TIFF — {n}개 파일 로드됨 (탭으로 전환)")
+        self._header.setText(f"TIFF — {n} File(s) loaded (Switch tabs)")
 
         for i, tr in enumerate(tiff_results):
             data2d = tr.get('data_2d')
@@ -774,7 +774,7 @@ class MultiTiffViewerWidget(QWidget):
             self._tab_widget.removeTab(0)
             w.deleteLater()
         self._viewers.clear()
-        self._header.setText("🔬 TIFF — 더블클릭으로 로드")
+        self._header.setText("TIFF — Double-click row to load")
 
 
 def create_tiff_widget() -> MultiTiffViewerWidget:
