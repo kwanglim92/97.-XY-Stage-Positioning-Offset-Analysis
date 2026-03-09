@@ -1,4 +1,4 @@
-from core import compute_statistics, filter_by_method
+from core import compute_statistics, filter_by_method, compute_deviation_matrix, compute_cpk
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 

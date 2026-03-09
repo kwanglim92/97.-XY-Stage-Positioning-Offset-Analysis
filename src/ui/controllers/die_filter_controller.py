@@ -1,4 +1,7 @@
 from PySide6.QtCore import QSize
+from PySide6.QtWidgets import QStyle
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+import charts as viz
 from core import filter_stabilization_die
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 

@@ -470,3 +470,93 @@ def plot_tiff_profile(data_2d, info: dict,
 # ──────────────────────────────────────────────
 
 
+def plot_vector_map(x_die_stats: list, y_die_stats: list,
+                    title: str = 'Vector Map (Quiver)',
+                    wafer_radius_um: float = 150_000,
+                    dynamic_positions: dict = None,
+                    scale_pct: int = 10):
+    """Die X/Y 편차를 Quiver(화살표)로 시각화.
+
+    Args:
+        x_die_stats, y_die_stats: compute_deviation_matrix() 결과의 die_stats
+        scale_pct: 화살표 배율 (% of wafer radius)
+    """
+    from core import get_die_position, extract_die_number
+
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=110)
+    fig.patch.set_facecolor('#1e1e2e')
+    ax.set_facecolor('#1e1e2e')
+
+    x_map = {extract_die_number(d['die']): d['avg'] for d in x_die_stats
+             if extract_die_number(d['die']) is not None}
+    y_map = {extract_die_number(d['die']): d['avg'] for d in y_die_stats
+             if extract_die_number(d['die']) is not None}
+
+    common = sorted(set(x_map.keys()) & set(y_map.keys()))
+    if not common:
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center',
+                transform=ax.transAxes, color='#888', fontsize=14)
+        return fig
+
+    xs, ys, us, vs = [], [], [], []
+    for d in common:
+        pos = get_die_position(f'Die{d+1}' if isinstance(d, int) else d, dynamic_positions)
+        if pos is None:
+            continue
+        xs.append(pos[0])
+        ys.append(pos[1])
+        us.append(x_map[d])
+        vs.append(y_map[d])
+
+    xs = np.array(xs, dtype=float)
+    ys = np.array(ys, dtype=float)
+    us = np.array(us, dtype=float)
+    vs = np.array(vs, dtype=float)
+
+    # 최대 벡터 길이와 데이터 범위로 스케일 결정
+    max_vec = max(np.sqrt(us**2 + vs**2).max(), 1e-9)
+    data_r = np.sqrt(xs**2 + ys**2).max() if len(xs) > 0 else wafer_radius_um / 1000
+    arrow_scale_factor = (scale_pct / 100.0) * data_r / max_vec
+
+    # Die positions (background dots)
+    ax.scatter(xs, ys, c='none', s=20, zorder=3,
+               edgecolors='#585b70', linewidths=0.5)
+
+    # Quiver
+    magnitudes = np.sqrt(us**2 + vs**2)
+    norm = Normalize(vmin=0, vmax=magnitudes.max() if magnitudes.max() > 0 else 1)
+    colors = plt.cm.RdYlGn_r(norm(magnitudes))
+
+    for i in range(len(xs)):
+        ax.annotate('', xy=(xs[i] + us[i] * arrow_scale_factor,
+                            ys[i] + vs[i] * arrow_scale_factor),
+                     xytext=(xs[i], ys[i]),
+                     arrowprops=dict(arrowstyle='->', color=colors[i],
+                                     lw=1.5, mutation_scale=12),
+                     zorder=5)
+
+    # Wafer circle
+    wr_mm = wafer_radius_um / 1000
+    circle = Circle((0, 0), wr_mm, fill=False, edgecolor='#585b70',
+                     linewidth=1.5, linestyle='--')
+    ax.add_patch(circle)
+
+    lim = wr_mm * 1.12
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect('equal')
+    ax.set_title(title, fontsize=12, fontweight='bold', color='#cdd6f4', pad=10)
+    ax.set_xlabel('X (mm)', fontsize=9, color='#a6adc8')
+    ax.set_ylabel('Y (mm)', fontsize=9, color='#a6adc8')
+    ax.tick_params(colors='#666', labelsize=8)
+    for s in ax.spines.values():
+        s.set_color('#363650')
+        s.set_linewidth(0.5)
+    ax.grid(True, color='#313244', alpha=0.3, linewidth=0.5)
+
+    # 범례
+    ax.text(0.02, 0.98, f'Scale: {scale_pct}%', transform=ax.transAxes,
+            fontsize=8, color='#a6adc8', va='top')
+
+    fig.tight_layout()
+    return fig
