@@ -5,6 +5,28 @@ from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QFont
 import numpy as np
 
+def _make_pen(color, width=2, style=None):
+    pen = pg.mkPen(color=color, width=width)
+    if style == 'dash':
+        pen.setStyle(Qt.DashLine)
+    elif style == 'dot':
+        pen.setStyle(Qt.DotLine)
+    return pen
+
+def _style_axis(plot_item, title='', x_label='', y_label=''):
+    BG2 = '#313244'; ACCENT = '#89b4fa'; FG2 = '#a6adc8'
+    title_style = {'color': ACCENT, 'size': '12pt', 'bold': True}
+    label_style = {'color': FG2, 'font-size': '10pt'}
+    plot_item.setTitle(title, **title_style)
+    plot_item.setLabel('bottom', x_label, **label_style)
+    plot_item.setLabel('left', y_label, **label_style)
+    plot_item.showGrid(x=True, y=True, alpha=0.15)
+    plot_item.getViewBox().setBackgroundColor(BG2)
+    for axis_name in ('bottom', 'left', 'top', 'right'):
+        ax = plot_item.getAxis(axis_name)
+        ax.setPen(pg.mkPen(color='#45475a'))
+        ax.setTextPen(pg.mkPen(color=FG2))
+
 # Theme colors
 BG      = '#1e1e2e'
 BG2     = '#313244'

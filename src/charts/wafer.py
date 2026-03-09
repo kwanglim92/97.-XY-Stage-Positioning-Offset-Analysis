@@ -479,18 +479,18 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
 
     Args:
         x_die_stats, y_die_stats: compute_deviation_matrix() 결과의 die_stats
+            die 필드는 'Die1', 'Die2', ... (1-based 표기)
         scale_pct: 화살표 배율 (% of wafer radius)
     """
-    from core import get_die_position, extract_die_number
+    from core import get_die_position
 
     fig, ax = plt.subplots(figsize=(7, 7), dpi=110)
     fig.patch.set_facecolor('#1e1e2e')
     ax.set_facecolor('#1e1e2e')
 
-    x_map = {extract_die_number(d['die']): d['avg'] for d in x_die_stats
-             if extract_die_number(d['die']) is not None}
-    y_map = {extract_die_number(d['die']): d['avg'] for d in y_die_stats
-             if extract_die_number(d['die']) is not None}
+    # die_stats의 die 필드는 이미 "Die1" 형식 (1-based) — 직접 key로 사용
+    x_map = {d['die']: d['avg'] for d in x_die_stats}
+    y_map = {d['die']: d['avg'] for d in y_die_stats}
 
     common = sorted(set(x_map.keys()) & set(y_map.keys()))
     if not common:
@@ -499,14 +499,20 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
         return fig
 
     xs, ys, us, vs = [], [], [], []
-    for d in common:
-        pos = get_die_position(f'Die{d+1}' if isinstance(d, int) else d, dynamic_positions)
+    for die_label in common:
+        pos = get_die_position(die_label, dynamic_positions)
         if pos is None:
             continue
         xs.append(pos[0])
         ys.append(pos[1])
-        us.append(x_map[d])
-        vs.append(y_map[d])
+        us.append(x_map[die_label])
+        vs.append(y_map[die_label])
+
+    if not xs:
+        ax.text(0.5, 0.5, 'No position data\n(Die positions not configured)',
+                ha='center', va='center',
+                transform=ax.transAxes, color='#888', fontsize=12)
+        return fig
 
     xs = np.array(xs, dtype=float)
     ys = np.array(ys, dtype=float)
@@ -560,3 +566,4 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
 
     fig.tight_layout()
     return fig
+

@@ -775,6 +775,7 @@ class UIBuilderMixin:
                 self._main_splitter.setSizes([total // 2, total // 2])
 
     def _show_guide_dialog(self):
+        from ui.dialogs.guide_dialog import GuideDialog
         dlg = GuideDialog(self)
         dlg.exec()
 
