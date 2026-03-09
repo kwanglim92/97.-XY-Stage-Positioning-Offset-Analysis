@@ -10,27 +10,29 @@
 ```
 97. XY Stage Positioning Offset Analysis/
 ├── src/
-│   ├── main.py               # GUI 메인 앱 (DataAnalyzerApp + GuideDialog, ~3000 줄)
-│   ├── csv_loader.py         # Lot 폴더 탐색, CSV/TXT 배치 로드 + IQR 이상치 탐지
-│   ├── recipe_scanner.py     # Recipe 디렉토리 구조 자동 탐지 + 트렌드 계산
-│   ├── analyzer.py           # 통계 엔진 (Statistics, Cpk, Deviation Matrix, Affine)
-│   ├── visualizer.py         # Matplotlib 정적 차트 (Contour, Vector, Scatter 등)
-│   ├── visualizer_pg.py      # pyqtgraph 인터랙티브 차트 (Trend, 분포, 3D)
-│   ├── sparkline_delegate.py # QPainter 기반 커스텀 테이블 셀 렌더러 (Sparkline)
-│   ├── exporter.py           # CSV / Excel 내보내기
-│   ├── pdf_generator.py      # PDF 리포트 생성 (matplotlib PDF 백엔드)
-│   ├── tiff_loader.py        # PSPylib 전용 TIFF 바이너리 파서
-│   ├── settings.py           # settings.json 로드/저장 유틸리티
-│   └── settings.json         # 사용자 설정 (Spec, 창 위치, Recipe 이름 등)
-├── docs/
-│   ├── SUMMARY_TABLE_GUIDE.md  # Summary 테이블 컬럼 가이드
-│   ├── TECH_STACK.md           # 기술 스택 정의
-│   ├── ARCHITECTURE.md         # 아키텍처 참조 (이 문서)
-│   └── DATA_ANALYSIS_GUIDE.md  # 데이터 해석 가이드 (엔지니어용)
-├── data/                     # 실제 측정 데이터 (Recipe별 폴더 구조)
-├── test/
-├── .gitignore
-└── PROJECT_SUMMARY.md        # 프로젝트 개요 (상위 레벨 레퍼런스)
+│   ├── main.py               # GUI 메인 앱 진입점 (~200 줄)
+│   ├── core/                 # 비즈니스 로직 및 엔진
+│   │   ├── statistics.py     # 범용 통계 처리 (Cpk, 등)
+│   │   ├── die_analysis.py   # Wafer/Die 전용 좌표 연산 엔진
+│   │   ├── csv_loader.py     # Lot 파일 탐색 및 CSV 파서
+│   │   ├── recipe_scanner.py # Recipe 자동 탐지 구조화
+│   │   ├── tiff_loader.py    # PSPylib 전용 TIFF 바이너리 파서
+│   │   ├── exporter.py       # CSV, Excel Export
+│   │   ├── pdf_generator.py  # PDF 리포트 생성
+│   │   └── settings.py       # 사용자 설정 관리
+│   ├── charts/               # 시각화 모듈
+│   │   ├── basic.py          # 범용 차트 (Matplotlib)
+│   │   ├── wafer.py          # Wafer Contour, Vector Map
+│   │   ├── comparison.py     # Recipe 비교 차트
+│   │   ├── interactive.py    # PyQtGraph 2D 위젯 (Trend, Scatter 등)
+│   │   ├── interactive_widgets.py # CrossHair 등 커스텀 위젯 클래스
+│   │   └── surface3d.py      # 3D 표면 차트
+│   └── ui/                   # UI 컴포넌트 관리
+│       ├── controllers/      # 기능 단위 Mixin (10종 결합하여 App 구성)
+│       ├── widgets/          # 공통 사용 위젯 (StatCard, SystemLogger 등)
+│       ├── dialogs/          # 팝업 대화상자 선언
+│       └── theme.py          # CSS 및 색상 상수
+├── docs/                     # 문서 폴더 (가이드 및 설계)
 ```
 
 ---
@@ -38,23 +40,17 @@
 ## 2. 모듈 의존 관계
 
 ```
-main.py
-├── csv_loader.py       (load_lot_folder, batch_load_lots)
-├── recipe_scanner.py   (scan_recipes, compute_trend)
-├── analyzer.py         (compute_statistics, compute_cpk,
-│                        compute_deviation_matrix, detect_outliers,
-│                        compute_affine_transform, filter_by_method)
-├── visualizer.py       (plot_contour_map, plot_vector_map,
-│                        plot_xy_scatter, plot_boxplot 등)
-├── visualizer_pg.py    (create_dual_trend_widget,
-│                        create_distribution_widget,
-│                        create_surface_3d_widget,
-│                        create_tiff_widget)
-├── sparkline_delegate.py (SparklineTrendDelegate)
-├── exporter.py         (export_combined_csv, export_excel_report)
-├── pdf_generator.py    (generate_pdf_report)
-├── tiff_loader.py      (load_tiff_file)
-└── settings.py         (load_settings, save_settings)
+main.py (DataAnalyzerApp + 여러 Mixin 상속)
+├── ui.controllers.*    (각종 이벤트 및 UI 조작 위임)
+├── core.csv_loader     (batch_load_lots 등 데이터 스캔)
+├── core.recipe_scanner (scan_recipes, compute_trend)
+├── core.statistics     (compute_statistics, compute_cpk 등 범용)
+├── core.die_analysis   (compute_deviation_matrix, filter_by_method 등 Die 전용)
+├── charts.*            (모든 차트 렌더링 호출)
+├── core.exporter       (Excel/CSV 내보내기)
+├── core.pdf_generator  (PDF 내보내기)
+├── core.tiff_loader    (TIFF 열기)
+└── core.settings       (환경 설정 연동)
 ```
 
 ---
@@ -161,14 +157,13 @@ DataAnalyzerApp (QMainWindow)
 
 | 클래스/컴포넌트 | 위치 | 역할 |
 |----------------|------|------|
-| `DataAnalyzerApp` | `main.py` | 앱 메인 창 (QMainWindow 상속) |
-| `GuideDialog` | `main.py` | 분석 가이드 도움말 팝업 (QDialog) |
-| `StatCard` | `main.py` | X/Y 통계 카드 위젯 (QFrame) |
-| `CopyableTable` | `main.py` | 드래그 선택 + Ctrl+C 복사 지원 테이블 |
-| `ScanWorker` | `main.py` | 비동기 스캔 스레드 (QThread) |
-| `ChartWidget` | `main.py` | Matplotlib Figure 임베드 위젯 |
-| `InteractiveChartWidget` | `main.py` | pyqtgraph 차트 임베드 위젯 |
-| `SparklineTrendDelegate` | `sparkline_delegate.py` | 테이블 셀 내 미니 라인 차트 렌더러 |
+| `DataAnalyzerApp` | `main.py` | 앱 메인 창 (QMainWindow + 다중 Mixin 상속) |
+| `GuideDialog` | `ui/dialogs/guide_dialog.py` | 분석 가이드 도움말 팝업 (QDialog) |
+| `StatCard` | `ui/widgets/stat_card.py` | X/Y 통계 카드 위젯 (QFrame) |
+| `CopyableTable` | `ui/widgets/copyable_table.py` | 복사 지원 데이블 |
+| `ScanWorker` | `ui/workers/data_loader_thread.py` | 비동기 스캔 스레드 |
+| `ChartWidget` | `ui/widgets/chart_widget.py` | Matplotlib 차트 임베드 위젯 |
+| `Controllers` | `ui/controllers/` | 기능별 10개 Mixin (TableMixin, ScanMixin 등) |
 
 ---
 

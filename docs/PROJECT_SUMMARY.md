@@ -1,7 +1,7 @@
 # 📊 XY Stage Positioning Offset Analysis Tool
 
 > **프로젝트**: XY Stage Offset 분석 도구 (PySide6)  
-> **버전**: v9.5  
+> **버전**: v10.0 (Refactored)  
 > **최종 업데이트**: 2026-03-06  
 > **플랫폼**: Windows / Python 3.11+  
 

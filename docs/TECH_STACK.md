@@ -58,13 +58,13 @@ QMainWindow          — 앱 루트
 
 | 알고리즘 | 모듈 | 함수 | 설명 |
 |----------|------|------|------|
-| 기술 통계 | `analyzer.py` | `compute_statistics()` | N, Mean, StdDev, Min, Max, CV% |
-| 공정 능력 | `analyzer.py` | `compute_cpk()` | Cpk = min[(USL-μ)/3σ, (μ-LSL)/3σ] |
-| 편차 행렬 | `analyzer.py` | `compute_deviation_matrix()` | Die×Repeat 행렬, overall_range/stddev |
-| Affine 변환 | `analyzer.py` | `compute_affine_transform()` | 최소자승법: Tx/Ty/Sx/Sy/θ 추출 |
-| 이상치 탐지 | `analyzer.py` | `detect_outliers()` | IQR (Q1-1.5×IQR ~ Q3+1.5×IQR) |
-| 트렌드 계산 | `recipe_scanner.py` | `compute_trend()` | Lot별 Mean/StdDev 시계열 |
-| Contour 보간 | `visualizer.py` | `plot_contour_map()` | scipy griddata, cubic interpolation |
+| 기술 통계 | `core/statistics.py 및 core/die_analysis.py` | `compute_statistics()` | N, Mean, StdDev, Min, Max, CV% |
+| 공정 능력 | `core/statistics.py 및 core/die_analysis.py` | `compute_cpk()` | Cpk = min[(USL-μ)/3σ, (μ-LSL)/3σ] |
+| 편차 행렬 | `core/statistics.py 및 core/die_analysis.py` | `compute_deviation_matrix()` | Die×Repeat 행렬, overall_range/stddev |
+| Affine 변환 | `core/statistics.py 및 core/die_analysis.py` | `compute_affine_transform()` | 최소자승법: Tx/Ty/Sx/Sy/θ 추출 |
+| 이상치 탐지 | `core/statistics.py 및 core/die_analysis.py` | `detect_outliers()` | IQR (Q1-1.5×IQR ~ Q3+1.5×IQR) |
+| 트렌드 계산 | `core/recipe_scanner.py` | `compute_trend()` | Lot별 Mean/StdDev 시계열 |
+| Contour 보간 | `charts/ 모듈 (basic.py, wafer.py 등)` | `plot_contour_map()` | scipy griddata, cubic interpolation |
 
 ---
 
@@ -72,8 +72,8 @@ QMainWindow          — 앱 루트
 
 | 엔진 | 용도 | 장단점 |
 |------|------|--------|
-| **Matplotlib** (`visualizer.py`) | Wafer Contour Map, Vector Map, XY Scatter, Boxplot 등 정적 차트 | 고품질 렌더링, 인터랙션 제한 |
-| **pyqtgraph** (`visualizer_pg.py`) | Lot Trend, 히스토그램+KDE, 3D Surface, TIFF Viewer | 실시간 줌/팬, OpenGL 가속 |
+| **Matplotlib** (`charts/ 모듈 (basic.py, wafer.py 등)`) | Wafer Contour Map, Vector Map, XY Scatter, Boxplot 등 정적 차트 | 고품질 렌더링, 인터랙션 제한 |
+| **pyqtgraph** (`charts/interactive.py 및 charts/interactive_widgets.py`) | Lot Trend, 히스토그램+KDE, 3D Surface, TIFF Viewer | 실시간 줌/팬, OpenGL 가속 |
 
 ### 4.1 Matplotlib 백엔드
 
@@ -94,11 +94,11 @@ import pyqtgraph.opengl as gl  # 3D Surface 렌더링
 
 | 형식 | 모듈 | 라이브러리 | 용도 |
 |------|------|------------|------|
-| **CSV/TXT** | `csv_loader.py` | `pandas.read_csv` | 원시 측정 데이터 로드 |
-| **JSON** | `settings.py` | `json` 표준 라이브러리 | Spec 설정, 창 위치 저장 |
-| **Excel (.xlsx)** | `exporter.py` | `openpyxl` | 분석 결과 리포트 |
-| **PDF** | `pdf_generator.py` | matplotlib PDF 백엔드 | 차트+통계 복합 리포트 |
-| **TIFF** | `tiff_loader.py` | `struct` 표준 라이브러리 | PSPylib 전용 바이너리 파서 |
+| **CSV/TXT** | `core/csv_loader.py` | `pandas.read_csv` | 원시 측정 데이터 로드 |
+| **JSON** | `core/settings.py` | `json` 표준 라이브러리 | Spec 설정, 창 위치 저장 |
+| **Excel (.xlsx)** | `core/exporter.py` | `openpyxl` | 분석 결과 리포트 |
+| **PDF** | `core/pdf_generator.py` | matplotlib PDF 백엔드 | 차트+통계 복합 리포트 |
+| **TIFF** | `core/tiff_loader.py` | `struct` 표준 라이브러리 | PSPylib 전용 바이너리 파서 |
 
 ### 5.1 네트워크 드라이브 (Z:) 접근
 
