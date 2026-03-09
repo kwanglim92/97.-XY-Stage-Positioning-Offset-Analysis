@@ -1,8 +1,8 @@
 # 📊 XY Stage Positioning Offset Analysis Tool
 
 > **프로젝트**: XY Stage Offset 분석 도구 (PySide6)  
-> **버전**: v10.0 (Refactored)  
-> **최종 업데이트**: 2026-03-06  
+> **버전**: v10.0 (Mixin 기반 모듈 아키텍처)  
+> **최종 업데이트**: 2026-03-09  
 > **플랫폼**: Windows / Python 3.11+  
 
 ---
@@ -111,63 +111,97 @@ QTableWidget { gridline-color: BG3; selection-background-color: #45475a; }
 ```
 97. XY Stage Positioning Offset Analysis/
 ├── src/
-│   ├── main.py               # GUI 메인 (DataAnalyzerApp + GuideDialog, ~3000행)
-│   ├── csv_loader.py         # Lot 폴더 스캔, CSV/TXT 배치 로드
-│   ├── recipe_scanner.py     # Recipe 디렉토리 구조 자동 탐지 + 트렌드 계산
-│   ├── analyzer.py           # 통계, Cpk, Deviation Matrix, Affine Transform
-│   ├── visualizer.py         # Matplotlib 차트 (Contour, Vector, Scatter 등)
-│   ├── visualizer_pg.py      # pyqtgraph 인터랙티브 차트 (Trend, 분포, 3D)
-│   ├── sparkline_delegate.py # QPainter 기반 커스텀 셀 렌더링
-│   ├── exporter.py           # CSV/Excel 내보내기
-│   ├── pdf_generator.py      # PDF 리포트 생성
-│   ├── tiff_loader.py        # PSPylib TIFF 바이너리 파서
-│   ├── settings.py           # 설정 로드/저장 유틸리티
-│   └── settings.json         # 사용자 설정 (Spec, 창 위치 등)
-├── data/                     # 측정 데이터 (Recipe별 폴더 구조)
-├── docs/
-│   ├── PROJECT_SUMMARY.md    # 이 문서
-│   ├── TECH_STACK.md         # 기술 스택 정의
-│   ├── ARCHITECTURE.md       # 아키텍처 참조 (모듈 의존 관계, UI 레이아웃 트리)
-│   ├── DATA_ANALYSIS_GUIDE.md # 엔지니어용 분석 가이드
-│   └── SUMMARY_TABLE_GUIDE.md # Summary 테이블 컬럼 가이드
-└── PROJECT_SUMMARY.md        # 루트 레퍼런스 (이 문서의 원본)
+│   ├── main.py                          ← 앱 진입점, Mixin 조립 (~200행)
+│   ├── core/                            ← 분석 엔진 (UI 무관)
+│   │   ├── statistics.py                ← 통계 계산 (Cpk, IQR, 상관관계)
+│   │   ├── die_analysis.py              ← Die 편차 행렬, Affine Transform
+│   │   ├── csv_loader.py                ← CSV 파싱, DLP xcopy 폴백
+│   │   ├── recipe_scanner.py            ← Recipe 자동 탐지 + Trend 계산
+│   │   ├── tiff_loader.py               ← PSPylib TIFF 바이너리 파서
+│   │   ├── exporter.py                  ← Excel/CSV 내보내기
+│   │   ├── pdf_generator.py             ← PDF 보고서 생성
+│   │   └── settings.py                  ← 설정 load/save
+│   ├── charts/                          ← 차트 생성기
+│   │   ├── wafer.py                     ← Contour, Vector Map, Die Position
+│   │   ├── basic.py                     ← Boxplot, Trend (Matplotlib)
+│   │   ├── comparison.py                ← Recipe 비교 차트
+│   │   ├── interactive.py               ← pyqtgraph 2D 차트
+│   │   ├── interactive_widgets.py       ← CrossHair, HoverScatter, TiffViewer
+│   │   └── surface3d.py                 ← 3D Surface (OpenGL)
+│   └── ui/
+│       ├── theme.py                     ← Catppuccin Mocha 색상 상수
+│       ├── color_helpers.py             ← 히트맵 색상 유틸
+│       ├── controllers/                 ← Mixin 기반 UI 제어 (10종)
+│       │   ├── ui_builder_mixin.py      ← 전체 레이아웃 구성
+│       │   ├── chart_controller.py      ← 차트 갱신
+│       │   ├── step_controller.py       ← 분석 결과 표시
+│       │   ├── scan_controller.py       ← 폴더 스캔·로드
+│       │   ├── table_controller.py      ← 데이터 테이블 갱신
+│       │   ├── card_controller.py       ← StatCard 갱신
+│       │   ├── die_filter_controller.py ← Die 필터
+│       │   ├── lot_filter_controller.py ← Lot 필터
+│       │   ├── xy_legend_controller.py  ← XY 범례
+│       │   ├── tiff_controller.py       ← TIFF 뷰어
+│       │   └── export_controller.py     ← 내보내기
+│       ├── widgets/                     ← 재사용 UI 부품
+│       │   ├── chart_widget.py          ← Matplotlib/pyqtgraph 컨테이너
+│       │   ├── stat_card.py             ← KPI 통계 카드
+│       │   ├── copyable_table.py        ← Ctrl+C 복사 테이블
+│       │   ├── flow_layout.py           ← 자동 줄바꿈 레이아웃
+│       │   └── system_logger.py         ← 로그 패널
+│       ├── dialogs/
+│       │   ├── guide_dialog.py          ← Analysis Guide 팝업
+│       │   ├── spec_config_dialog.py    ← Spec 설정 팝업
+│       │   └── repeat_contour_dialog.py ← Repeat 비교 팝업
+│       └── workers/
+│           └── data_loader_thread.py    ← 백그라운드 파일 로더
+├── data/                                ← 측정 데이터 (Recipe별 폴더)
+└── docs/                                ← 문서
+    ├── PROJECT_SUMMARY.md               ← 이 문서
+    ├── ARCHITECTURE.md                  ← 모듈 의존 관계, UI 레이아웃 트리
+    ├── TECH_STACK.md                    ← 기술 스택 정의
+    ├── DATA_ANALYSIS_GUIDE.md           ← 엔지니어용 분석 가이드
+    ├── SUMMARY_TABLE_GUIDE.md           ← Summary 테이블 컬럼 가이드
+    └── final_migration_report.md        ← v10.0 마이그레이션 완료 보고서
 ```
 
 ---
 
 ## 5. 모듈 상세
 
-### 5.1 `csv_loader.py` — 데이터 로딩
-- Lot 폴더 단위로 CSV/TXT 파일을 스캔
-- `HZ1_O` 컬럼에서 X/Y Offset 값 추출
-- 각 레코드에 `method` 키로 X/Y 축 정보 저장 (Method ID 기반)
-- Outlier 감지 (IQR 방식) 및 유효성 필터링
+### 5.1 `core/` — 분석 엔진
 
-### 5.2 `recipe_scanner.py` — Recipe 자동 탐지
-- 지정 폴더 하위의 Recipe 디렉토리 구조를 자동으로 스캔
-- Step 인덱스, 이름, Round 경로를 구조화하여 반환
-- `compute_trend()` — Lot별 Mean/StdDev 트렌드 계산
-
-### 5.3 `analyzer.py` — 분석 엔진
-
-| 함수 | 설명 |
+| 모듈 | 주요 함수 / 역할 |
 |---|---|
-| `compute_statistics` | N, Mean, StdDev, Min, Max, CV% |
-| `compute_cpk` | Cpk = min((USL-μ), (μ-LSL)) / (3σ) |
-| `compute_deviation_matrix` | Die × Repeat 편차 행렬, overall_range/stddev |
-| `compute_affine_transform` | 최소자승법으로 Tx, Ty, Sx(ppm), Sy(ppm), θ(deg) 추출 |
-| `filter_by_method` | `method` 필드로 X/Y 필터링 |
-| `detect_outliers` | IQR 기반 이상치 검출 |
+| `csv_loader.py` | CSV/TXT 배치 로드, DLP xcopy 폴백, 인코딩 자동 감지 |
+| `recipe_scanner.py` | Recipe 구조 자동 탐지, `compute_trend()` — Lot별 트렌드 |
+| `statistics.py` | `compute_statistics`, `compute_cpk`, `detect_outliers` |
+| `die_analysis.py` | `compute_deviation_matrix`, `compute_affine_transform`, `filter_by_method` |
+| `tiff_loader.py` | PSPylib 바이너리 TIFF 파서 |
+| `exporter.py` | CSV/Excel 내보내기 |
+| `pdf_generator.py` | PDF 보고서 생성 |
+| `settings.py` | `load_settings` / `save_settings` |
 
-### 5.4 `visualizer_pg.py` — pyqtgraph 인터랙티브 차트
+### 5.2 `charts/` — 차트 생성기
 
-| 함수 | 설명 |
+| 모듈 | 차트 유형 |
 |---|---|
-| `create_dual_trend_widget` | X/Y 분리 Lot Trend (Mean ± 1σ, Spec 라인) |
-| `create_distribution_widget` | 히스토그램 + KDE |
-| `create_surface_3d_widget` | OpenGL 3D 표면 맵 |
+| `wafer.py` | Contour Map, Vector Map (Colorbar + Show Values 토글), Die Position Map |
+| `basic.py` | Boxplot, Trend (Matplotlib) |
+| `comparison.py` | Recipe 비교 차트 |
+| `interactive.py` | Lot Trend, XY Scatter, Distribution, Pareto, Correlation (pyqtgraph) |
+| `interactive_widgets.py` | CrossHair, HoverScatter, TiffViewer 위젯 |
+| `surface3d.py` | 3D Surface (OpenGL) |
 
-### 5.5 `main.py` — GUI (DataAnalyzerApp)
+### 5.3 `ui/` — 프레젠테이션 계층
+
+- **`ui/theme.py`**: Catppuccin Mocha 색상 상수 (`BG`, `ACCENT`, `GREEN`, …)
+- **`ui/widgets/`**: `StatCard`, `CopyableTable`, `ChartWidget`, `FlowLayout`, `SystemLogger`
+- **`ui/dialogs/`**: `GuideDialog`, `SpecConfigDialog`, `RepeatContourDialog`
+- **`ui/workers/`**: `ScanWorker` (QThread 기반 비동기 로드)
+- **`ui/controllers/`**: 10개 Mixin — `UiBuilderMixin`, `ChartController`, `StepController`, `ScanController`, `TableController`, `CardController`, `DieFilterController`, `LotFilterController`, `XyLegendController`, `TiffController`, `ExportController`
+
+### 5.4 `main.py` — Mixin 조립 진입점
 
 **레이아웃 구조 (QSplitter 5:5):**
 ```
@@ -218,22 +252,24 @@ QTableWidget { gridline-color: BG3; selection-background-color: #45475a; }
 ```
 📁 Root 폴더 선택
     ↓
-recipe_scanner: Recipe 구조 자동 탐지 (Step 번호, 이름, Round)
+ScanWorker (QThread): 비동기 실행
     ↓
-[v9.5] 폴더명 검증: short_name ↔ spec_deviation 키 대조 (엄격 일치)
-    → 불일치 시 QMessageBox.critical 표시 후 스캔 차단
+core.recipe_scanner.scan_recipes() → recipes[]
     ↓
-csv_loader: Lot별 CSV/TXT 배치 로드 → records[] (method='X'/'Y')
+폴더명 검증: short_name ↔ spec_deviation 키 엄격 비교
+    → 불일치 시 QMessageBox.critical → 스캔 차단
     ↓
-analyzer: compute_statistics(X), compute_statistics(Y) → Mean, StdDev, Cpk
-analyzer: compute_deviation_matrix(X/Y) → overall_range, overall_stddev
+core.csv_loader.batch_load_lots() → raw_data[] (method='X'/'Y')
     ↓
-PASS/FAIL 판정: spec_deviation 기준 (settings.json)
+core.statistics.compute_statistics(X/Y) → Mean, StdDev, Cpk
+core.die_analysis.compute_deviation_matrix() → overall_range, overall_stddev
     ↓
-visualizer: Contour / Vector / Scatter (Matplotlib)
-visualizer_pg: Lot Trend / Distribution / 3D (pyqtgraph)
+PASS/FAIL 판정: spec_deviation 기준 (core/settings.json)
     ↓
-GUI 표시: 좌측 Stats+Tables | 우측 Charts
+charts.wafer: Contour / Vector Map (Colorbar + Show Values)
+charts.interactive: Lot Trend / Distribution / 3D (pyqtgraph)
+    ↓
+ui.controllers.*: 좌측 Stats+Tables | 우측 Charts 갱신
 ```
 
 ---
@@ -297,12 +333,12 @@ r.get('axis')                  # 존재하지 않음
 
 | 모듈 | 독립성 | 통합 난이도 |
 |---|---|---|
-| `csv_loader.py` | ✅ 완전 독립 | 낮음 |
-| `recipe_scanner.py` | ✅ 완전 독립 | 낮음 |
-| `analyzer.py` | ✅ 완전 독립 | 낮음 |
-| `visualizer.py / visualizer_pg.py` | ✅ plt 인스턴스 독립 | 낮음 |
-| `settings.py / settings.json` | ⚠️ 파일 경로 하드코딩 | 중간 |
-| `main.py` (GUI) | ❌ 단독 실행 전제 | 높음 — 위젯 추출 필요 |
+| `core/*` | ✅ 완전 독립 (UI 미참조) | 낮음 |
+| `charts/*` | ✅ plt 인스턴스 독립 | 낮음 |
+| `ui/widgets/*` | ✅ 독립 재사용 가능 | 낮음 |
+| `ui/dialogs/*` | ✅ QDialog 단독 팝업 | 낮음 |
+| `core/settings.py` | ⚠️ 파일 경로 참조 | 중간 |
+| `main.py` (Mixin 조립) | ⚠️ 단독 실행 전제이나 위젯 분리 용이 | 중간 |
 
 ### 9.3 플러그인 통합 로드맵
 
@@ -375,8 +411,10 @@ pip install PySide6 numpy pandas scipy matplotlib openpyxl pyqtgraph PyOpenGL
 | 9.1 | pyqtgraph 인터랙티브 차트 (Lot Trend, 분포, 3D) | ✅ |
 | 9.2 | X/Y 분리 아키텍처 (독립 축별 드리프트 감지) | ✅ |
 | 9.3 | Spec 대비 카드 표기 + Spec 다이얼로그 + 하드코딩 제거 | ✅ |
-| **9.4** | Die 필터 토글 + XY Scatter 범례 패널 + Log Scale + Lot 필터 체크박스 트렌드 | ✅ |
-| **9.5** | **엄격 폴더명 검증** + 테이블 전역 가운데 정렬 + **GuideDialog** (5섹션 엔지니어 분석 가이드) + logger.warn 버그 수정 + UI 버튼명 영문화 | ✅ |
+| 9.4 | Die 필터 토글 + XY Scatter 범례 패널 + Log Scale + Lot 필터 | ✅ |
+| 9.5 | 엄격 폴더명 검증 + 테이블 가운데 정렬 + GuideDialog + UI 영문화 | ✅ |
+| **10.0** | **Mixin 기반 모듈 아키텍처** — core/charts/ui 3계층, 10개 Controller Mixin, 레거시 파일 정리 | ✅ |
+| 10.1 | Vector Map Colorbar + Show Values 토글 추가 | ✅ |
 
 ---
 
@@ -388,6 +426,7 @@ pip install PySide6 numpy pandas scipy matplotlib openpyxl pyqtgraph PyOpenGL
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | docs/ | 모듈 의존 관계, 데이터 흐름, UI 레이아웃 트리 |
 | [DATA_ANALYSIS_GUIDE.md](./DATA_ANALYSIS_GUIDE.md) | docs/ | 엔지니어용 분석 가이드 (지표 해석, 패턴 진단표) |
 | [SUMMARY_TABLE_GUIDE.md](./SUMMARY_TABLE_GUIDE.md) | docs/ | Summary 테이블 컬럼별 상세 설명 |
+| [final_migration_report.md](./final_migration_report.md) | docs/ | v10.0 마이그레이션 완료 보고서 (버그 수정 목록, 구조 현황) |
 
 ---
 

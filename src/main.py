@@ -147,38 +147,6 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
     # ──────────────────────────────────────────────
     # Navigation
     # ──────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

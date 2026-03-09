@@ -1,7 +1,7 @@
 # 🏗️ 아키텍처 참조 문서
 
-> XY Stage Positioning Offset Analysis Tool — v9.x  
-> 최종 업데이트: 2026-03-06
+> XY Stage Positioning Offset Analysis Tool — v10.0 (Mixin 기반 모듈 아키텍처)  
+> 최종 업데이트: 2026-03-09
 
 ---
 
@@ -126,29 +126,29 @@ DataAnalyzerApp (QMainWindow)
     │       └─ Die 체크박스 목록 (Die 1~22)
     │
     └─ RIGHT PANEL (QTabWidget — chart_category_tabs)
-        ├─ "기본 분석"
-        │   ├─ "Contour X / Y"
+        ├─ "Basic Analysis"
+        │   ├─ "Contour X / Y"  (Repeat별 Contour 버튼 포함)
         │   ├─ "Die Position Map"
-        │   └─ "Vector Map"
-        ├─ "인터랙티브"
-        │   ├─ "🎯 XY Scatter" + 사이드 범례 패널
-        │   ├─ "📈 Lot Trend"  + Lot 필터
-        │   ├─ "📊 분포 X/Y"
-        │   └─ "🔬 TIFF"
-        ├─ "고급 분석"
-        │   ├─ "🔍 Pareto"
-        │   ├─ "🔗 Correlation"
-        │   └─ "🌐 3D Surface X/Y"
-        ├─ "비교"
-        │   ├─ "📊 Boxplot"
-        │   ├─ "📈 Trend"
-        │   └─ "🗺️ Heatmap"
-        └─ "📤 Export"
-            └─ "내보내기"
-                ├─ 분석 가이드 보기 버튼 → GuideDialog
-                ├─ Excel 내보내기
-                ├─ CSV 내보내기
-                └─ PDF 보고서
+        │   └─ "Vector Map"  (Colorbar + Show Values 토글)
+        ├─ "Interactive"
+        │   ├─ "XY Scatter" + 사이드 범례 + Log Scale 토글
+        │   ├─ "Lot Trend"  + Lot 필터 체크박스
+        │   ├─ "Distribution X / Y" (서브탭)
+        │   └─ "TIFF"
+        ├─ "Advanced"
+        │   ├─ "Pareto"
+        │   ├─ "Correlation"
+        │   └─ "3D Surface X / Y" (서브탭)
+        ├─ "Comparison"
+        │   ├─ "Boxplot"
+        │   ├─ "Trend"
+        │   └─ "Heatmap"
+        └─ "Export"
+            └─ "Export"
+                ├─ Analysis Guide 버튼 → GuideDialog
+                ├─ Excel Export
+                ├─ CSV Export
+                └─ PDF Report
 ```
 
 ---
@@ -157,13 +157,15 @@ DataAnalyzerApp (QMainWindow)
 
 | 클래스/컴포넌트 | 위치 | 역할 |
 |----------------|------|------|
-| `DataAnalyzerApp` | `main.py` | 앱 메인 창 (QMainWindow + 다중 Mixin 상속) |
+| `DataAnalyzerApp` | `main.py` | 앱 메인 창 (QMainWindow + 10개 Mixin 상속) |
 | `GuideDialog` | `ui/dialogs/guide_dialog.py` | 분석 가이드 도움말 팝업 (QDialog) |
+| `SpecConfigDialog` | `ui/dialogs/spec_config_dialog.py` | Spec 설정 확인 팝업 |
+| `RepeatContourDialog` | `ui/dialogs/repeat_contour_dialog.py` | Repeat별 Contour 비교 팝업 |
 | `StatCard` | `ui/widgets/stat_card.py` | X/Y 통계 카드 위젯 (QFrame) |
-| `CopyableTable` | `ui/widgets/copyable_table.py` | 복사 지원 데이블 |
-| `ScanWorker` | `ui/workers/data_loader_thread.py` | 비동기 스캔 스레드 |
-| `ChartWidget` | `ui/widgets/chart_widget.py` | Matplotlib 차트 임베드 위젯 |
-| `Controllers` | `ui/controllers/` | 기능별 10개 Mixin (TableMixin, ScanMixin 등) |
+| `CopyableTable` | `ui/widgets/copyable_table.py` | Ctrl+C 복사 지원 테이블 |
+| `ScanWorker` | `ui/workers/data_loader_thread.py` | 비동기 스캔 스레드 (QThread) |
+| `ChartWidget` | `ui/widgets/chart_widget.py` | Matplotlib/pyqtgraph 임베드 컨테이너 |
+| Controllers | `ui/controllers/` | 10개 Mixin (UiBuilder, Chart, Step, Scan, Table, Card, DieFiler, LotFilter, XyLegend, Tiff, Export) |
 
 ---
 
@@ -249,3 +251,5 @@ overall = pass_x and pass_y
 | v9.3 | Spec 대비 카드 + Spec 다이얼로그 + 하드코딩 제거 |
 | v9.4 | Die 필터 토글 + XY Scatter 범례 패널 + Log Scale |
 | v9.5 | 폴더명 엄격 검증 + 테이블 가운데 정렬 + 분석 가이드 Dialog |
+| **v10.0** | **Mixin 기반 모듈 아키텍처** — core/charts/ui 3계층 분리, 9개 버그 수정 |
+| **v10.1** | Vector Map Colorbar + "Show Values" 토글 추가 |

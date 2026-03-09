@@ -553,10 +553,8 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
         # ── Show Values 모드: magnitude 레이블 ──
         if show_values:
             mag = magnitudes[i]
-            # 레이블 위치: 화살표 끝점 기준 약간 오프셋
-            lx = xs[i] + us[i] * arrow_scale_factor
-            ly = ys[i] + vs[i] * arrow_scale_factor
-            ax.text(lx, ly, f'{mag:.2f}µm',
+            # 레이블 위치: 화살표 시작점(Die 위치) 바로 위
+            ax.text(xs[i], ys[i], f'{mag:.2f}µm',
                     fontsize=6.5, color='#e0e0e0',
                     ha='center', va='bottom', zorder=7,
                     bbox=dict(boxstyle='round,pad=0.15',
