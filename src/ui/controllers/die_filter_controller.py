@@ -1,5 +1,6 @@
 from PySide6.QtCore import QSize
 from core import filter_stabilization_die
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class DieFilterMixin:

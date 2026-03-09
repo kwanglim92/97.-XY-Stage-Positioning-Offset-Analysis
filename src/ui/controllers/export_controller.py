@@ -4,6 +4,7 @@ import os, threading
 from core.exporter import export_combined_csv, export_excel_report
 from core import compute_repeatability, compute_trend
 from core.recipe_scanner import load_all_recipes, compare_recipes
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class ExportMixin:

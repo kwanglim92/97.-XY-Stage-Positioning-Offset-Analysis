@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox, QLabel
 from PySide6.QtCore import Qt, QSize
 import charts as viz
 from core import extract_die_positions
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class XYLegendMixin:

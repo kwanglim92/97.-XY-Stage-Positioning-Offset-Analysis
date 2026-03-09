@@ -1,4 +1,5 @@
 from core import compute_statistics, filter_by_method
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class CardMixin:

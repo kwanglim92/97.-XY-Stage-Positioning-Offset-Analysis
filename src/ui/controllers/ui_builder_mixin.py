@@ -5,7 +5,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 
 import math
 from functools import partial
-from ui.theme import *
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 from ui.widgets.stat_card import StatCard
 from ui.widgets.system_logger import SystemLogger
 from ui.widgets.copyable_table import CopyableTable

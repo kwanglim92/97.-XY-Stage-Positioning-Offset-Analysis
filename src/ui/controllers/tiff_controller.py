@@ -4,6 +4,7 @@ import os
 from core.tiff_loader import load_tiff
 from charts import MultiTiffViewerWidget
 from __main__ import __file__ as _main_file_path
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class TiffMixin:

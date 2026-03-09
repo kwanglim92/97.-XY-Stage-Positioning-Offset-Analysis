@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QTableWidgetItem
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from ui.color_helpers import _heatmap_diverging, _heatmap_single, _contrast_fg
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class TableMixin:

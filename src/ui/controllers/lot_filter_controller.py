@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QCheckBox
 from PySide6.QtCore import Qt
 import charts as viz
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class LotFilterMixin:

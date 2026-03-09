@@ -3,6 +3,7 @@ import charts as viz
 import charts as viz_pg
 from core import compute_deviation_matrix, compute_xy_product, extract_die_positions
 from core import compute_statistics, filter_by_method
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class ChartMixin:

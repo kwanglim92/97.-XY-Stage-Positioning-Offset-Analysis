@@ -3,6 +3,7 @@ from functools import partial
 from core import compute_deviation_matrix, extract_die_positions
 from core import compute_statistics, filter_by_method
 from core.recipe_scanner import scan_lot_folders
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class StepMixin:

@@ -4,6 +4,7 @@ from core.recipe_scanner import scan_recipes
 from ui.workers.data_loader_thread import DataLoaderThread
 from core.settings import add_recent_folder
 from core import compute_deviation_matrix, compute_affine_transform
+from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
 class ScanMixin:
