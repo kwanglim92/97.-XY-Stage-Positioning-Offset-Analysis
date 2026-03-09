@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -474,15 +474,19 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
                     title: str = 'Vector Map (Quiver)',
                     wafer_radius_um: float = 150_000,
                     dynamic_positions: dict = None,
-                    scale_pct: int = 10):
+                    scale_pct: int = 10,
+                    show_values: bool = False):
     """Die X/Y 편차를 Quiver(화살표)로 시각화.
 
     Args:
         x_die_stats, y_die_stats: compute_deviation_matrix() 결과의 die_stats
             die 필드는 'Die1', 'Die2', ... (1-based 표기)
         scale_pct: 화살표 배율 (% of wafer radius)
+        show_values: True이면 각 화살표 옆에 magnitude(µm) 값 레이블 표시
     """
     from core import get_die_position
+    import matplotlib.cm as cm
+    import matplotlib.colorbar
 
     fig, ax = plt.subplots(figsize=(7, 7), dpi=110)
     fig.patch.set_facecolor('#1e1e2e')
@@ -498,7 +502,7 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
                 transform=ax.transAxes, color='#888', fontsize=14)
         return fig
 
-    xs, ys, us, vs = [], [], [], []
+    xs, ys, us, vs, die_labels = [], [], [], [], []
     for die_label in common:
         pos = get_die_position(die_label, dynamic_positions)
         if pos is None:
@@ -507,6 +511,7 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
         ys.append(pos[1])
         us.append(x_map[die_label])
         vs.append(y_map[die_label])
+        die_labels.append(die_label)
 
     if not xs:
         ax.text(0.5, 0.5, 'No position data\n(Die positions not configured)',
@@ -519,8 +524,10 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
     us = np.array(us, dtype=float)
     vs = np.array(vs, dtype=float)
 
+    magnitudes = np.sqrt(us**2 + vs**2)
+
     # 최대 벡터 길이와 데이터 범위로 스케일 결정
-    max_vec = max(np.sqrt(us**2 + vs**2).max(), 1e-9)
+    max_vec = max(magnitudes.max(), 1e-9)
     data_r = np.sqrt(xs**2 + ys**2).max() if len(xs) > 0 else wafer_radius_um / 1000
     arrow_scale_factor = (scale_pct / 100.0) * data_r / max_vec
 
@@ -528,11 +535,13 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
     ax.scatter(xs, ys, c='none', s=20, zorder=3,
                edgecolors='#585b70', linewidths=0.5)
 
-    # Quiver
-    magnitudes = np.sqrt(us**2 + vs**2)
-    norm = Normalize(vmin=0, vmax=magnitudes.max() if magnitudes.max() > 0 else 1)
-    colors = plt.cm.RdYlGn_r(norm(magnitudes))
+    # 컬러맵 + Normalize
+    cmap = plt.cm.RdYlGn_r
+    mag_max = magnitudes.max() if magnitudes.max() > 0 else 1.0
+    norm = Normalize(vmin=0, vmax=mag_max)
+    colors = cmap(norm(magnitudes))
 
+    # 화살표
     for i in range(len(xs)):
         ax.annotate('', xy=(xs[i] + us[i] * arrow_scale_factor,
                             ys[i] + vs[i] * arrow_scale_factor),
@@ -540,6 +549,27 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
                      arrowprops=dict(arrowstyle='->', color=colors[i],
                                      lw=1.5, mutation_scale=12),
                      zorder=5)
+
+        # ── Show Values 모드: magnitude 레이블 ──
+        if show_values:
+            mag = magnitudes[i]
+            # 레이블 위치: 화살표 끝점 기준 약간 오프셋
+            lx = xs[i] + us[i] * arrow_scale_factor
+            ly = ys[i] + vs[i] * arrow_scale_factor
+            ax.text(lx, ly, f'{mag:.2f}µm',
+                    fontsize=6.5, color='#e0e0e0',
+                    ha='center', va='bottom', zorder=7,
+                    bbox=dict(boxstyle='round,pad=0.15',
+                              fc='#1e1e2e', ec='none', alpha=0.7))
+
+    # Colorbar (ScalarMappable로 생성)
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.75, pad=0.03, aspect=25)
+    cbar.set_label('Deviation Magnitude (µm)', color='#a6adc8', fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color='#585b70', labelcolor='#a6adc8',
+                                   labelsize=7)
+    cbar.outline.set_edgecolor('#45475a')
 
     # Wafer circle
     wr_mm = wafer_radius_um / 1000
@@ -560,10 +590,9 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
         s.set_linewidth(0.5)
     ax.grid(True, color='#313244', alpha=0.3, linewidth=0.5)
 
-    # 범례
+    # Scale 텍스트
     ax.text(0.02, 0.98, f'Scale: {scale_pct}%', transform=ax.transAxes,
             fontsize=8, color='#a6adc8', va='top')
 
     fig.tight_layout()
     return fig
-

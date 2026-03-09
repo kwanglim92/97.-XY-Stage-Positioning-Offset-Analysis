@@ -128,12 +128,15 @@ class ChartMixin:
         try:
             if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
                 scale_pct = self.vector_scale_slider.value()
+                show_values = getattr(self, 'vector_show_values_btn', None)
+                show_values = show_values.isChecked() if show_values else False
                 self.chart_widgets['Vector Map'].set_figure(
                     viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
                                         title=f'{short} — Vector Map',
                                         wafer_radius_um=wr,
                                         dynamic_positions=dyn,
-                                        scale_pct=scale_pct))
+                                        scale_pct=scale_pct,
+                                        show_values=show_values))
         except Exception as e:
             self.logger.error(f"Vector Map 차트 오류: {e}")
 
@@ -176,12 +179,15 @@ class ChartMixin:
         recipe = self.recipes[self.current_recipe_idx]
         short = recipe.get('short_name', '')
         try:
+            show_values = getattr(self, 'vector_show_values_btn', None)
+            show_values = show_values.isChecked() if show_values else False
             self.chart_widgets['Vector Map'].set_figure(
                 viz.plot_vector_map(self._dev_x['die_stats'], self._dev_y['die_stats'],
                                     title=f'{short} — Vector Map',
                                     wafer_radius_um=wr,
                                     dynamic_positions=dyn,
-                                    scale_pct=value))
+                                    scale_pct=value,
+                                    show_values=show_values))
         except Exception as e:
             self.logger.error(f"Vector Map 재렌더링 오류: {e}")
 

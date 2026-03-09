@@ -431,6 +431,32 @@ class UIBuilderMixin:
             lambda: QToolTip.showText(help_btn.mapToGlobal(
                 help_btn.rect().bottomLeft()), _help_text, help_btn, help_btn.rect(), 8000))
         slider_bar.addWidget(help_btn)
+
+        # ── Show Values 토글 버튼 ──
+        self.vector_show_values_btn = QPushButton("📐 Show Values")
+        self.vector_show_values_btn.setCheckable(True)
+        self.vector_show_values_btn.setChecked(False)
+        self.vector_show_values_btn.setFixedHeight(24)
+        self.vector_show_values_btn.setToolTip(
+            "ON: 각 화살표 옆에 편차 크기(µm)를 표시합니다\n"
+            "OFF: 패턴/방향 파악에 집중합니다")
+        self.vector_show_values_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {FG2}; background: {BG2};
+                border: 1px solid #45475a; border-radius: 4px;
+                padding: 0 8px; font-size: 8pt;
+            }}
+            QPushButton:checked {{
+                color: {BG}; background: {ACCENT};
+                border: 1px solid {ACCENT};
+                font-weight: bold;
+            }}
+            QPushButton:hover:!checked {{ background: {BG3}; }}
+        """)
+        self.vector_show_values_btn.toggled.connect(
+            lambda _: self._on_vector_scale_changed(self.vector_scale_slider.value()))
+        slider_bar.addWidget(self.vector_show_values_btn)
+
         slider_bar.addStretch()
 
         vm_layout.addLayout(slider_bar)
