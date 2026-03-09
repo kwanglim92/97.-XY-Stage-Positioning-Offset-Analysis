@@ -112,7 +112,7 @@ class StepMixin:
 
         # Die 체크박스 동적 생성 (첫 호출 or Step 전환 시)
         from core import extract_die_number
-        from charts import _color_from_die
+        from charts.wafer import _color_from_die
         die_nums_in_data = sorted(set(
             extract_die_number(r.get('site_id', ''))
             for r in raw if extract_die_number(r.get('site_id', '')) is not None))

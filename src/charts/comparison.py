@@ -17,7 +17,7 @@ plt.rcParams['axes.unicode_minus'] = False
 RECIPE_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#E91E63',
                  '#9C27B0', '#00BCD4', '#795548', '#607D8B']
 
-from charts.basic import plot_boxplot, plot_trend_chart, _fig_to_png
+from charts.basic import plot_boxplot, plot_trend_chart, _fig_to_png, _extract_site_data
 from core import compute_group_statistics, compute_trend
 
 def plot_recipe_comparison_boxplot(recipe_results: list) -> Figure:

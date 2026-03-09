@@ -1,7 +1,8 @@
 import pyqtgraph as pg
 import pyqtgraph.opengl as gl
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter
 from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QFont
 import numpy as np
 
 # Theme colors

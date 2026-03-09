@@ -1,6 +1,9 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox, QLabel, QPushButton
 from PySide6.QtCore import Qt, QSize
+from functools import partial
 import charts as viz
+import charts as viz_pg
+from charts.interactive import _DIE_COLORS
 from core import extract_die_positions
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
@@ -25,7 +28,6 @@ class XYLegendMixin:
 
     def _rebuild_xy_legend(self):
         """XY Scatter 사이드 범례 패널 재구성."""
-        from charts import _DIE_COLORS
 
         # 기존 버튼 제거
         while self._xy_legend_btn_layout.count() > 0:
@@ -89,7 +91,7 @@ class XYLegendMixin:
 
     def _xy_legend_update_styles(self):
         """범례 버튼 스타일 갱신 — 하이라이트된 Die 강조."""
-        from charts import _DIE_COLORS
+
         for die_label, btn in self._xy_legend_buttons.items():
             idx = int(die_label.replace('Die', ''))
             color = _DIE_COLORS[idx % len(_DIE_COLORS)]
