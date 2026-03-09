@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QMessageBox, QFileDialog
 from PySide6.QtCore import Qt
 import os
-from tiff_loader import load_tiff
-from visualizer_pg import MultiTiffViewerWidget
+from core.tiff_loader import load_tiff
+from charts import MultiTiffViewerWidget
 from __main__ import __file__ as _main_file_path
 
 
@@ -91,7 +91,7 @@ class TiffMixin:
         QApplication.processEvents()
 
         try:
-            from tiff_loader import load_tiff
+            from core.tiff_loader import load_tiff
 
             results = []
             for tp in tiff_paths:

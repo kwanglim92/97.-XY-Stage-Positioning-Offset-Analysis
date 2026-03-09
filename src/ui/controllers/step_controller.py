@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QLabel, QPushButton, QCheckBox
 from functools import partial
-from analyzer import compute_deviation_matrix, extract_die_positions
-from analyzer import compute_statistics, filter_by_method
-from recipe_scanner import scan_lot_folders
+from core import compute_deviation_matrix, extract_die_positions
+from core import compute_statistics, filter_by_method
+from core.recipe_scanner import scan_lot_folders
 
 
 class StepMixin:
@@ -110,8 +110,8 @@ class StepMixin:
         raw = result.get('raw_data', [])
 
         # Die 체크박스 동적 생성 (첫 호출 or Step 전환 시)
-        from analyzer import extract_die_number
-        from visualizer import _color_from_die
+        from core import extract_die_number
+        from charts import _color_from_die
         die_nums_in_data = sorted(set(
             extract_die_number(r.get('site_id', ''))
             for r in raw if extract_die_number(r.get('site_id', '')) is not None))

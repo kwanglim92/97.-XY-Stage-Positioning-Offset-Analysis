@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QCheckBox
 from PySide6.QtCore import Qt
-import visualizer as viz
+import charts as viz
 
 
 class LotFilterMixin:

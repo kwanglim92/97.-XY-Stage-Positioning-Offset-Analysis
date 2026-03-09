@@ -14,8 +14,8 @@ recipe_scanner.py — Multi-Recipe 자동 탐지 및 비교
 
 import os
 import re
-from csv_loader import scan_lot_folders, batch_load, get_scan_summary
-from analyzer import (compute_statistics, compute_trend,
+from core.csv_loader import scan_lot_folders, batch_load, get_scan_summary
+from core import (compute_statistics, compute_trend,
                       detect_outliers, compute_repeatability,
                       compute_group_statistics, filter_by_method)
 

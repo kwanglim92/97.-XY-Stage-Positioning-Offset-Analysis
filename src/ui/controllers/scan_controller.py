@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 import os
-from recipe_scanner import scan_recipes
+from core.recipe_scanner import scan_recipes
 from ui.workers.data_loader_thread import DataLoaderThread
-from settings import add_recent_folder
-from analyzer import compute_deviation_matrix, compute_affine_transform
+from core.settings import add_recent_folder
+from core import compute_deviation_matrix, compute_affine_transform
 
 
 class ScanMixin:

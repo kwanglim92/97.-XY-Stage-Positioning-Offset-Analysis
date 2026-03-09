@@ -1,8 +1,8 @@
 from PySide6.QtCore import QTimer
-import visualizer as viz
-import visualizer_pg as viz_pg
-from analyzer import compute_deviation_matrix, compute_xy_product, extract_die_positions
-from analyzer import compute_statistics, filter_by_method
+import charts as viz
+import charts as viz_pg
+from core import compute_deviation_matrix, compute_xy_product, extract_die_positions
+from core import compute_statistics, filter_by_method
 
 
 class ChartMixin:

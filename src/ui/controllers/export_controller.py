@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import QMessageBox, QFileDialog
 from PySide6.QtCore import QTimer
 import os, threading
-from exporter import export_combined_csv, export_excel_report
-from analyzer import compute_repeatability, compute_trend
-from recipe_scanner import load_all_recipes, compare_recipes
+from core.exporter import export_combined_csv, export_excel_report
+from core import compute_repeatability, compute_trend
+from core.recipe_scanner import load_all_recipes, compare_recipes
 
 
 class ExportMixin:
@@ -48,7 +48,7 @@ class ExportMixin:
             try:
                 results = load_all_recipes(self.path_edit.text(), round_name='1st', axis='both')
                 comp = compare_recipes(results)
-                from pdf_generator import generate_pdf_report
+                from core.pdf_generator import generate_pdf_report
                 generate_pdf_report(path, self.path_edit.text(), results, comp,
                                     self.settings.get('spec_limits', {}))
                 QTimer.singleShot(0, lambda: self.logger.ok(f"PDF 저장 완료: {path}"))

@@ -3,7 +3,7 @@ data_loader_thread.py — 백그라운드 데이터 로딩 스레드
 """
 
 from PySide6.QtCore import QThread, Signal
-from recipe_scanner import load_all_recipes, compare_recipes
+from core.recipe_scanner import load_all_recipes, compare_recipes
 
 
 class DataLoaderThread(QThread):

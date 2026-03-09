@@ -1,4 +1,4 @@
-from analyzer import compute_statistics, filter_by_method
+from core import compute_statistics, filter_by_method
 
 
 class CardMixin:

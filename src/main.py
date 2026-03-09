@@ -32,8 +32,8 @@ matplotlib.use("Agg")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from csv_loader import scan_lot_folders, batch_load, get_scan_summary
-from analyzer import (
+from core.csv_loader import scan_lot_folders, batch_load, get_scan_summary
+from core import (
     compute_statistics, compute_group_statistics, compute_trend,
     detect_outliers, compute_repeatability, compute_cpk,
     filter_by_method, filter_valid_only, compute_deviation_matrix,
@@ -41,12 +41,12 @@ from analyzer import (
     compute_pareto_data, compute_correlation, extract_die_positions,
     filter_stabilization_die,
 )
-from exporter import export_combined_csv, export_excel_report
-from settings import load_settings, save_settings, add_recent_folder
+from core.exporter import export_combined_csv, export_excel_report
+from core.settings import load_settings, save_settings, add_recent_folder
 ## sparkline_delegate not currently used (gauge removed)
-from recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
-import visualizer as viz
-import visualizer_pg as viz_pg
+from core.recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
+import charts as viz
+import charts as viz_pg
 
 # 
 #  분리된 UI 모듈 import

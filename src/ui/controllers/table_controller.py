@@ -7,7 +7,7 @@ from ui.color_helpers import _heatmap_diverging, _heatmap_single, _contrast_fg
 
 class TableMixin:
     def _update_summary_table(self, comparison, recipe_results=None):
-        from analyzer import (compute_deviation_matrix, compute_statistics,
+        from core import (compute_deviation_matrix, compute_statistics,
                               filter_by_method)
         t = self.sum_table
         t.setRowCount(0)

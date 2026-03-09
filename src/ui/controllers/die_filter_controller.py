@@ -1,5 +1,5 @@
 from PySide6.QtCore import QSize
-from analyzer import filter_stabilization_die
+from core import filter_stabilization_die
 
 
 class DieFilterMixin:
@@ -52,7 +52,7 @@ class DieFilterMixin:
         raw = self.recipe_results[self.current_recipe_idx].get('raw_data', [])
         if not raw:
             return
-        from analyzer import extract_die_number
+        from core import extract_die_number
         first_die = extract_die_number(raw[0].get('site_id', ''))
         if first_die is None:
             return

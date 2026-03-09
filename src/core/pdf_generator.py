@@ -9,8 +9,8 @@ import os
 import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-import visualizer as viz
-from analyzer import filter_by_method, compute_trend
+import charts as viz
+from core import filter_by_method, compute_trend
 
 
 def _add_title_page(pdf: PdfPages, root_folder: str, comparison: list):
