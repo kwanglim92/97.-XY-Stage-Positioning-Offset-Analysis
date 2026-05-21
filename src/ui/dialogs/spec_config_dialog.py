@@ -1,4 +1,3 @@
-import os
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox
 from ui.theme import BG, FG, ACCENT, FG2
 
@@ -52,14 +51,9 @@ class SpecConfigDialog(QDialog):
         t_lim.resizeRowsToContents()
         layout.addWidget(t_lim)
 
-        # 파일 경로 안내
-        import __main__
-        if hasattr(__main__, '__file__'):
-            path = os.path.join(os.path.dirname(os.path.abspath(__main__.__file__)), 'settings.json')
-        else:
-            path = "settings.json (경로 불명확)"
-            
-        lbl_path = QLabel(f"📁 {path}")
+        # 파일 경로 안내 — 실제 저장 위치(core.settings.SETTINGS_FILE)를 그대로 표시
+        from core.settings import SETTINGS_FILE
+        lbl_path = QLabel(SETTINGS_FILE)
         lbl_path.setStyleSheet(f"color: {FG2}; font-size: 8pt; margin-top: 8px;")
         lbl_path.setWordWrap(True)
         layout.addWidget(lbl_path)

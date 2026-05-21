@@ -7,7 +7,7 @@ settings.py — 설정 저장/로드 (JSON)
 import os
 import json
 
-# 설정 파일 경로 (src/ 폴더에 저장)
+# 설정 파일 경로 (이 모듈과 같은 src/core/ 폴더에 저장)
 SETTINGS_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, 'settings.json')
 
