@@ -5,3 +5,8 @@ test/
 venv/
 .env
 .vscode/
+
+# PyInstaller / 빌드 산출물
+build/
+dist/
+.pytest_cache/

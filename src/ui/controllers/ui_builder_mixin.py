@@ -14,6 +14,8 @@ from ui.widgets.chart_widget import ChartWidget, InteractiveChartWidget
 import charts as viz
 import charts as viz_pg
 from core import get_die_position
+from ui.controllers.table_controller import (
+    SUMMARY_ROW_LABELS, SUMMARY_GROUP_HEADER_ROWS, SUMMARY_CHK_ROWS)
 
 class UIBuilderMixin:
     def _build_ui(self):
@@ -42,7 +44,7 @@ class UIBuilderMixin:
 
         # Wafer 크기 선택 (200mm / 300mm)
         top.addSpacing(16)
-        wafer_label = QLabel("Wafer:")
+        wafer_label = QLabel("Wafer Size:")
         wafer_label.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
         top.addWidget(wafer_label)
         self.wafer_combo = QComboBox()
@@ -225,18 +227,54 @@ class UIBuilderMixin:
         data_layout.addWidget(die_filter_frame)
         self.main_tabs.addTab(data_widget, "Data Table")
 
-        # Sub 1: Summary
+        # Sub 1: Summary — 통합 전치 테이블 (행 레이아웃은 SUMMARY_ROW_LABELS 참조)
+        class _ChecklistBorderDelegate(QStyledItemDelegate):
+            """체크리스트 수치 행 첫 열 좌측에 Accent 바(4px)."""
+            _CHK_ROWS = set(SUMMARY_CHK_ROWS)
+            _BAR_CLR = '#89b4fa'
+            _BAR_W   = 4
+
+            def paint(self, painter, option, index):
+                super().paint(painter, option, index)
+                if index.row() not in self._CHK_ROWS:
+                    return
+                if index.column() != 0:
+                    return
+                from PySide6.QtGui import QColor as QC
+                painter.save()
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QC(self._BAR_CLR))
+                rc = option.rect
+                painter.drawRect(rc.x(), rc.y(), self._BAR_W, rc.height())
+                painter.restore()
+
+
+        summary_widget = QWidget()
+        summary_layout = QVBoxLayout(summary_widget)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(0)
+
         self.sum_table = CopyableTable()
-        cols_s = ['Recipe', 'R', 'N', 'Mean', 'Stdev', 'Min', 'Max', 'CV%', 'Out', 'X', 'Y', 'Result']
-        self.sum_table.setColumnCount(len(cols_s))
-        self.sum_table.setHorizontalHeaderLabels(cols_s)
-        hdr = self.sum_table.horizontalHeader()
-        for col in range(len(cols_s)):
-            hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(1, 70), (2, 35), (8, 30), (9, 30), (10, 30), (11, 30)]:
-            hdr.setSectionResizeMode(col, QHeaderView.Fixed)
-            self.sum_table.setColumnWidth(col, width)
-        self.data_tabs.addTab(self.sum_table, "Summary")
+        # 행 레이아웃은 table_controller.SUMMARY_ROW_LABELS 단일 출처를 사용
+        self.sum_table.setRowCount(len(SUMMARY_ROW_LABELS))
+        self.sum_table.setVerticalHeaderLabels(SUMMARY_ROW_LABELS)
+        vhdr = self.sum_table.verticalHeader()
+        vhdr.setVisible(True)
+        vhdr.setFixedWidth(148)
+        vhdr.setDefaultSectionSize(24)
+        for _grp_row in SUMMARY_GROUP_HEADER_ROWS:
+            self.sum_table.setRowHeight(_grp_row, 26)
+        self.sum_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+        # 셀 delegate (Accent 바)
+        self._chk_delegate = _ChecklistBorderDelegate(self.sum_table)
+        self.sum_table.setItemDelegate(self._chk_delegate)
+
+        self.sum_table.setSizeAdjustPolicy(
+            self.sum_table.SizeAdjustPolicy.AdjustToContents)
+        summary_layout.addWidget(self.sum_table)
+        summary_layout.addStretch(1)
+        self.data_tabs.addTab(summary_widget, "Summary")
 
         # Sub 2: Die 평균 (X/Y sub-tabs)
         die_widget = QWidget()
@@ -673,17 +711,21 @@ class UIBuilderMixin:
         surface_tabs.setDocumentMode(True)
         surface_x = InteractiveChartWidget()
         surface_y = InteractiveChartWidget()
+        surface_mag = InteractiveChartWidget()
         surface_tabs.addTab(surface_x, 'X')
         surface_tabs.addTab(surface_y, 'Y')
+        surface_tabs.addTab(surface_mag, 'X+Y (Mag)')
         self.chart_widgets['3D X'] = surface_x
         self.chart_widgets['3D Y'] = surface_y
+        self.chart_widgets['3D X+Y'] = surface_mag
         _add_chart('Advanced', '3D Surface', surface_tabs, register=False)
 
         # 비교 (matplotlib — Recipe Comparison: 3개 서브탭)
         for name in ['Boxplot', 'Trend', 'Heatmap']:
             _add_chart('Comparison', name, ChartWidget())
 
-        # 📤 Export 탭
+        # ── Remark 탭 (Export + Help 하위탭) ──────────────────────
+        # ── Export 하위탭 ─────────────────────────────────────────
         export_widget = QWidget()
         export_layout = QVBoxLayout(export_widget)
         export_layout.setContentsMargins(40, 40, 40, 40)
@@ -694,26 +736,10 @@ class UIBuilderMixin:
         export_header.setAlignment(Qt.AlignCenter)
         export_layout.addWidget(export_header)
 
-        export_desc_layout = QHBoxLayout()
         export_desc = QLabel("분석 결과를 다양한 형식으로 내보낼 수 있습니다.")
         export_desc.setStyleSheet(f"color:{FG2}; font-size:10pt;")
-        export_desc.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        export_desc_layout.addWidget(export_desc)
-
-        export_desc_layout.addStretch()
-
-        btn_guide = QPushButton("Analysis Guide")
-        btn_guide.setStyleSheet(f"""
-            QPushButton {{ background: {BG3}; color: {ACCENT}; border: 1px solid {BG3};
-                          border-radius: 4px; font-size: 10pt; font-weight: bold; padding: 8px 16px; }}
-            QPushButton:hover {{ background: {ACCENT}; color: {BG}; border: 1px solid {ACCENT}; }}
-        """)
-        btn_guide.setCursor(Qt.PointingHandCursor)
-        btn_guide.clicked.connect(self._show_guide_dialog)
-        export_desc_layout.addWidget(btn_guide)
-
-        export_layout.addLayout(export_desc_layout)
-
+        export_desc.setAlignment(Qt.AlignCenter)
+        export_layout.addWidget(export_desc)
         export_layout.addSpacing(10)
 
         export_buttons_data = [
@@ -743,12 +769,123 @@ class UIBuilderMixin:
 
         export_layout.addStretch()
 
-        # Export 카테고리로 등록 (단일 페이지 — 내부 탭 없음)
-        inner_export = QTabWidget()
-        inner_export.setDocumentMode(True)
-        inner_export.addTab(export_widget, 'Export')
-        self._inner_tabs['Export'] = inner_export
-        self.chart_category_tabs.addTab(inner_export, 'Export')
+        # ── Help 하위탭 ───────────────────────────────────────────
+        help_widget = QWidget()
+        help_layout = QVBoxLayout(help_widget)
+        help_layout.setContentsMargins(40, 30, 40, 30)
+        help_layout.setSpacing(12)
+
+        help_scroll_content = QWidget()
+        help_scroll_layout = QVBoxLayout(help_scroll_content)
+        help_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        help_scroll_layout.setSpacing(14)
+
+        # 1) 프로그램 정보
+        info_header = QLabel("XY Stage Positioning Offset Analysis")
+        info_header.setStyleSheet(f"color:{ACCENT}; font-size:14pt; font-weight:bold;")
+        info_header.setAlignment(Qt.AlignCenter)
+        help_scroll_layout.addWidget(info_header)
+
+        info_version = QLabel("v1.0  |  Production & Quality Control Team, Manufacturing Dept.")
+        info_version.setStyleSheet(f"color:{FG2}; font-size:9pt;")
+        info_version.setAlignment(Qt.AlignCenter)
+        help_scroll_layout.addWidget(info_version)
+
+        from PySide6.QtWidgets import QFrame as _QFrame
+        sep1 = _QFrame(); sep1.setFrameShape(_QFrame.HLine)
+        sep1.setStyleSheet(f"color:{BG3};"); help_scroll_layout.addWidget(sep1)
+
+        dev_label = QLabel(
+            "Developer :  Levi.Beak\n"
+            "Team          :  Production &amp; Quality Control Team, Manufacturing Dept.\n"
+            "Email          :  levi.beak@parksystems.com"
+        )
+        dev_label.setStyleSheet(f"color:{FG}; font-size:9pt; line-height:160%;")
+        dev_label.setAlignment(Qt.AlignCenter)
+        dev_label.setTextFormat(Qt.RichText)
+        help_scroll_layout.addWidget(dev_label)
+
+        sep2 = _QFrame(); sep2.setFrameShape(_QFrame.HLine)
+        sep2.setStyleSheet(f"color:{BG3};"); help_scroll_layout.addWidget(sep2)
+
+        # 2) Analysis Guide 버튼
+        btn_guide = QPushButton("Analysis Guide")
+        btn_guide.setStyleSheet(f"""
+            QPushButton {{ background: {BG3}; color: {ACCENT};
+                          border: 1px solid {ACCENT}60; border-radius: 6px;
+                          font-size: 11pt; font-weight: bold; padding: 10px 24px; }}
+            QPushButton:hover {{ background: {ACCENT}; color: {BG}; }}
+        """)
+        btn_guide.setCursor(Qt.PointingHandCursor)
+        btn_guide.clicked.connect(self._show_guide_dialog)
+        btn_guide.setFixedHeight(44)
+        help_scroll_layout.addWidget(btn_guide, alignment=Qt.AlignCenter)
+
+        sep3 = _QFrame(); sep3.setFrameShape(_QFrame.HLine)
+        sep3.setStyleSheet(f"color:{BG3};"); help_scroll_layout.addWidget(sep3)
+
+        # 3) 체크리스트 기입 방법 — 제목
+        guide_title = QLabel("체크리스트 기입 방법")
+        guide_title.setStyleSheet(f"color:{FG}; font-size:11pt; font-weight:bold;")
+        guide_title.setAlignment(Qt.AlignLeft)
+        help_scroll_layout.addWidget(guide_title)
+
+        guide_sub = QLabel("Summary 탭의 Checklist 섹션 값을 Recipe 열 순서대로 확인하여 기입하세요.")
+        guide_sub.setStyleSheet(f"color:{FG2}; font-size:9pt;")
+        guide_sub.setWordWrap(True)
+        help_scroll_layout.addWidget(guide_sub)
+
+        # 4) 다이어그램 이미지
+        import os
+        _img_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'checklist_guide.png')
+        _img_path = os.path.normpath(_img_path)
+        from PySide6.QtGui import QPixmap
+        if os.path.exists(_img_path):
+            img_label = QLabel()
+            pix = QPixmap(_img_path)
+            img_label.setPixmap(pix.scaledToWidth(850, Qt.SmoothTransformation))
+            img_label.setAlignment(Qt.AlignCenter)
+            help_scroll_layout.addWidget(img_label)
+        else:
+            no_img = QLabel("[이미지 없음: assets/checklist_guide.png]")
+            no_img.setStyleSheet(f"color:{FG2}; font-size:8pt;")
+            help_scroll_layout.addWidget(no_img)
+
+        # 5) 단계별 텍스트 가이드
+        steps_text = (
+            "<ol style='color:#cdd6f4; font-size:9pt; line-height:200%;'>"
+            "<li><b>Summary</b> 탭을 클릭합니다.</li>"
+            "<li>상단 <b>Checklist</b> 섹션에서 각 Recipe 열의 값을 확인합니다.<br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;<span style='color:#a6adc8;'>"
+            "① Vision Pattern &nbsp;② In-Die Align &nbsp;③ LLC Translation &nbsp;④ Global Align</span></li>"
+            "<li><b>X Result</b> / <b>Y Result</b> (PASS/FAIL) 를 최종 확인 후 진행합니다.</li>"
+            "<li><b>X Dev Range</b>, <b>Y Dev Range</b>, <b>X Dev StdDev</b>, <b>Y Dev StdDev</b> 값을 "
+            "순서대로 체크리스트에 기입합니다.</li>"        
+            "<li>결과를 <b>Remark &gt; Export</b> 탭에서 Excel로 저장할 수 있습니다.</li>"
+            "</ol>"
+        )
+        steps_label = QLabel(steps_text)
+        steps_label.setTextFormat(Qt.RichText)
+        steps_label.setWordWrap(True)
+        steps_label.setStyleSheet(f"background:{BG3}; border-radius:6px; padding:14px;")
+        help_scroll_layout.addWidget(steps_label)
+        help_scroll_layout.addStretch()
+
+        # 스크롤 영역 적용
+        help_scroll = QScrollArea()
+        help_scroll.setWidget(help_scroll_content)
+        help_scroll.setWidgetResizable(True)
+        help_scroll.setFrameShape(QScrollArea.NoFrame)
+        help_layout.addWidget(help_scroll)
+
+        # ── Remark 카테고리 탭으로 등록 ───────────────────────────
+        inner_remark = QTabWidget()
+        inner_remark.setDocumentMode(True)
+        inner_remark.addTab(export_widget, 'Export')
+        inner_remark.addTab(help_widget,   'Help')
+        self._inner_tabs['Remark'] = inner_remark
+        self.chart_category_tabs.addTab(inner_remark, 'Remark')
+
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 5)
@@ -802,8 +939,15 @@ class UIBuilderMixin:
 
     def _show_guide_dialog(self):
         from ui.dialogs.guide_dialog import GuideDialog
-        dlg = GuideDialog(self)
-        dlg.exec()
+        # 이미 열려 있으면 앞으로 가져오기 (중복 창 방지)
+        if hasattr(self, '_guide_dlg') and self._guide_dlg is not None \
+                and self._guide_dlg.isVisible():
+            self._guide_dlg.raise_()
+            self._guide_dlg.activateWindow()
+            return
+        self._guide_dlg = GuideDialog(self)
+        self._guide_dlg.setModal(False)   # 비모달 — 부모 창 락 해제
+        self._guide_dlg.show()
 
     def _open_repeat_contour(self, axis: str = 'X'):
         from ui.dialogs.repeat_contour_dialog import RepeatContourDialog

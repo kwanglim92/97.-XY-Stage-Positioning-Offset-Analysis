@@ -300,8 +300,9 @@ def create_scatter_widget(x_dev_result: dict, y_dev_result: dict,
             w.add_die_scatter(xa, ya, dl, color)
 
     # Spec Range 가이드 박스
+    # Range = 총 폭(max-min) → 박스 반폭 = range / 2
     if spec_range is not None and spec_range > 0:
-        sr = spec_range
+        sr = spec_range / 2   # ★ 수정: 절반만 사용
         if log_mode:
             sr = float(np.sign(sr) * np.log10(1 + abs(sr)))
         from pyqtgraph import QtWidgets, QtCore, QtGui
@@ -311,9 +312,9 @@ def create_scatter_widget(x_dev_result: dict, y_dev_result: dict,
         rect.setZValue(2)  # 데이터(5~10) 뒤, 십자선(기본) 앞
         w.addItem(rect, ignoreBounds=True)
 
-        # 라벨
+        # 라벨 (Range = 총 폭 표기)
         spec_label = pg.TextItem(
-            f'Spec ±{spec_range}µm', color='#ff6b6b',
+            f'Spec Range: {spec_range}µm', color='#ff6b6b',
             anchor=(1, 1))
         spec_label.setFont(QFont('Consolas', 8))
         spec_label.setPos(sr, sr)

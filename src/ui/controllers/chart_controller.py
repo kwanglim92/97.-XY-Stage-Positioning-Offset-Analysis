@@ -82,7 +82,7 @@ class ChartMixin:
         except Exception as e:
             self.logger.error(f"Correlation 차트 오류: {e}")
 
-        # ─── 3D Surface (OpenGL) ─ X/Y 분리 ───
+        # ─── 3D Surface (OpenGL) ─ X/Y 분리 및 X+Y 합성 ───
         for axis_key, dev in [('X', self._dev_x), ('Y', self._dev_y)]:
             try:
                 ds = dev.get('die_stats')
@@ -92,6 +92,26 @@ class ChartMixin:
                             ds, title=f'{short} — 3D {axis_key} Surface'))
             except Exception as e:
                 self.logger.error(f"3D {axis_key} Surface 오류: {e}")
+                
+        # 3D X+Y (Magnitude) 생성
+        try:
+            if self._dev_x.get('die_stats') and self._dev_y.get('die_stats'):
+                import math
+                mag_stats = []
+                # die 번호를 기준으로 X와 Y 값을 매칭
+                x_dict = {d['die']: d['avg'] for d in self._dev_x['die_stats']}
+                y_dict = {d['die']: d['avg'] for d in self._dev_y['die_stats']}
+                
+                for die_num in set(x_dict.keys()).intersection(y_dict.keys()):
+                    mag = math.sqrt(x_dict[die_num]**2 + y_dict[die_num]**2)
+                    mag_stats.append({'die': die_num, 'avg': mag})
+                
+                if mag_stats:
+                    self.chart_widgets['3D X+Y'].set_widget(
+                        viz_pg.create_3d_surface_widget(
+                            mag_stats, title=f'{short} — 3D X+Y Magnitude Surface'))
+        except Exception as e:
+            self.logger.error(f"3D X+Y Surface 오류: {e}")
 
         # ─── matplotlib 차트 (Contour/Vector — scipy 보간) ───
         wr = self._get_wafer_radius_um()

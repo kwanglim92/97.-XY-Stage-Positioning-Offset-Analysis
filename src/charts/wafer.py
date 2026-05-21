@@ -560,6 +560,7 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
                     bbox=dict(boxstyle='round,pad=0.15',
                               fc='#1e1e2e', ec='none', alpha=0.7))
 
+
     # Colorbar (ScalarMappable로 생성)
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
