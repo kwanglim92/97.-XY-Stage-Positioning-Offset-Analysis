@@ -23,6 +23,14 @@ class ScanMixin:
             QMessageBox.warning(self, "경고", "유효한 폴더를 선택해주세요.")
             return
 
+        # 재진입 차단: 이전 로드 스레드가 아직 실행 중이면 새 스캔을 시작하지 않는다.
+        # (실행 중 스레드 참조를 덮어써 누수·UI 변조가 일어나는 것을 방지)
+        if self._loader_thread is not None and self._loader_thread.isRunning():
+            self.logger.warn("이미 스캔이 진행 중입니다. 완료 후 다시 시도하세요.")
+            QMessageBox.information(self, "알림",
+                                    "이미 스캔이 진행 중입니다. 완료될 때까지 기다려주세요.")
+            return
+
         self.main_tabs.setCurrentIndex(0)
         self.logger.section("폴더 스캔 시작")
         self.logger.info(f"경로: {folder}")
@@ -80,12 +88,26 @@ class ScanMixin:
         self._build_nav()
 
         self.logger.info("전체 Recipe 데이터 로드 시작 (1st round)...")
+        self._set_scan_controls_enabled(False)
         self._loader_thread = DataLoaderThread(folder)
         self._loader_thread.finished.connect(self._on_scan_complete)
-        self._loader_thread.error.connect(
-            lambda e: (self.logger.error(f"로드 오류: {e}"),
-                       QMessageBox.critical(self, "오류", e)))
+        self._loader_thread.error.connect(self._on_scan_error)
         self._loader_thread.start()
+
+    def _set_scan_controls_enabled(self, enabled: bool):
+        """스캔 진행 중 중복 트리거 방지를 위해 Scan/Open 버튼 활성/비활성."""
+        for attr in ('btn_scan', 'btn_browse'):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setEnabled(enabled)
+
+    def _on_scan_error(self, e):
+        """로드 스레드 error 슬롯 — 메시지 표시 + 상태 복구(스레드 리셋, 버튼 재활성)."""
+        self.logger.error(f"로드 오류: {e}")
+        self._loader_thread = None
+        self._set_scan_controls_enabled(True)
+        self.statusBar().showMessage("스캔 실패")
+        QMessageBox.critical(self, "오류", str(e))
 
 
     def _on_scan_complete(self, results, comparison, elapsed):
@@ -107,10 +129,16 @@ class ScanMixin:
                 af = compute_affine_transform(dx['die_stats'], dy['die_stats'])
                 name = result.get('short_name', f'Step {i+1}')
                 self.logger.head(f"[{name}]")
-                self.logger.info(f"  Translation: Tx={af['tx']:+.4f} µm, Ty={af['ty']:+.4f} µm")
-                self.logger.info(f"  Scaling: Sx={af['sx_ppm']:+.2f} ppm, Sy={af['sy_ppm']:+.2f} ppm")
-                self.logger.info(f"  Rotation: θ={af['theta_deg']:+.6f}° ({af['theta_urad']:+.2f} µrad)")
-                self.logger.info(f"  Residual RMS: X={af['residual_x']:.4f}, Y={af['residual_y']:.4f}")
+                if af.get('degenerate'):
+                    self.logger.warn(
+                        f"  ⚠ Die 좌표가 공선이거나 유효 Die가 3점 미만이라 "
+                        f"Affine 계통오차 분리 불가 (유효 Die {af.get('n_dies', 0)}개) "
+                        f"— Translation/Scaling/Rotation 신뢰 불가")
+                else:
+                    self.logger.info(f"  Translation: Tx={af['tx']:+.4f} µm, Ty={af['ty']:+.4f} µm")
+                    self.logger.info(f"  Scaling: Sx={af['sx_ppm']:+.2f} ppm, Sy={af['sy_ppm']:+.2f} ppm")
+                    self.logger.info(f"  Rotation: θ={af['theta_deg']:+.6f}° ({af['theta_urad']:+.2f} µrad)")
+                    self.logger.info(f"  Residual RMS: X={af['residual_x']:.4f}, Y={af['residual_y']:.4f}")
 
         self.main_tabs.setCurrentIndex(1)
         self.data_tabs.setCurrentIndex(0)
@@ -142,5 +170,9 @@ class ScanMixin:
 
         self.statusBar().showMessage(
             f"✅ {len(self.recipes)}개 Recipe | {total}개 데이터 | Step 클릭 → 상세 분석")
+
+        # 스레드 완료 → 참조 해제 + 컨트롤 재활성 (isRunning() 가드를 신뢰 가능하게 유지)
+        self._loader_thread = None
+        self._set_scan_controls_enabled(True)
 
 

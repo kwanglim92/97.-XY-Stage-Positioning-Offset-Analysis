@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QLabel, QPushButton, QCheckBox
 from functools import partial
-from core import compute_deviation_matrix, extract_die_positions
+from core import compute_deviation_matrix, extract_die_positions, evaluate_deviation_pass
 from core import compute_statistics, filter_by_method
 from core.recipe_scanner import scan_lot_folders
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
@@ -48,8 +48,9 @@ class StepMixin:
             dy = compute_deviation_matrix(data, 'Y')
             sx = compute_statistics(filter_by_method(data, 'X'))
             sy = compute_statistics(filter_by_method(data, 'Y'))
-            px = (dx['overall_range'] <= spec_r and dx['overall_stddev'] <= spec_s) if (sx['count'] > 0 and spec_r is not None) else None
-            py = (dy['overall_range'] <= spec_r and dy['overall_stddev'] <= spec_s) if (sy['count'] > 0 and spec_r is not None) else None
+            # PASS/FAIL 판정은 core.evaluate_deviation_pass 단일 출처를 사용 (CardMixin과 동일).
+            px = evaluate_deviation_pass(sx, dx, spec_r, spec_s)
+            py = evaluate_deviation_pass(sy, dy, spec_r, spec_s)
             if px is None or py is None:
                 self.step_pass_states[i] = None
             else:

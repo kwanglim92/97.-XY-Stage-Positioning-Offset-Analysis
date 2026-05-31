@@ -248,19 +248,21 @@ def compute_repeatability(data: list, metric_key: str = 'value') -> dict:
 
 def compute_cpk(mean: float, stdev: float, lsl: Optional[float] = None, usl: Optional[float] = None) -> float:
     """Cpk(공정능력지수) 계산
-    
+
     Args:
         mean: 평균
         stdev: 표준편차
         lsl: 하한 (Lower Specification Limit)
         usl: 상한 (Upper Specification Limit)
-        
+
     Returns:
-        Cpk 값 (계산 불가 시 0.0 반환)
+        Cpk 값. 계산 불가 시(σ=0 — 단일 샘플/무변동, 또는 LSL·USL 둘 다 없음)
+        실제 값 0.0과 구분되는 float('nan')을 반환한다. 표시 측에서 NaN을 'N/A'로
+        처리해야 한다.
     """
     if stdev == 0 or (lsl is None and usl is None):
-        return 0.0
-        
+        return float('nan')
+
     cpk_lsl = (mean - lsl) / (3 * stdev) if lsl is not None else float('inf')
     cpk_usl = (usl - mean) / (3 * stdev) if usl is not None else float('inf')
     

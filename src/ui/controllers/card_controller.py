@@ -1,4 +1,5 @@
-from core import compute_statistics, filter_by_method, compute_deviation_matrix, compute_cpk
+from core import (compute_statistics, filter_by_method, compute_deviation_matrix,
+                  compute_cpk, evaluate_deviation_pass)
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 
 
@@ -30,13 +31,8 @@ class CardMixin:
         spec_r = ds.get('spec_range')
         spec_s = ds.get('spec_stddev')
 
-        def _pass(st, dev):
-            if st['count'] == 0 or spec_r is None or spec_s is None:
-                return None
-            return dev['overall_range'] <= spec_r and dev['overall_stddev'] <= spec_s
-
-        px = _pass(s_x, dev_x)
-        py = _pass(s_y, dev_y)
+        px = evaluate_deviation_pass(s_x, dev_x, spec_r, spec_s)
+        py = evaluate_deviation_pass(s_y, dev_y, spec_r, spec_s)
         self.card_x.update_stats(s_x['mean'], dev_x['overall_range'],
                                  dev_x['overall_stddev'], cpk_x, px,
                                  spec_r=spec_r, spec_s=spec_s)

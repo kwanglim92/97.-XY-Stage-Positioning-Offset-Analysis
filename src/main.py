@@ -42,7 +42,7 @@ from core import (
     filter_stabilization_die,
 )
 from core.exporter import export_combined_csv, export_excel_report
-from core.settings import load_settings, save_settings, add_recent_folder
+from core.settings import load_settings, save_settings, add_recent_folder, parse_geometry_string
 ## sparkline_delegate not currently used (gauge removed)
 from core.recipe_scanner import scan_recipes, load_recipe_data, load_all_recipes, compare_recipes
 import charts as viz
@@ -108,8 +108,7 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
         self._lot_checkboxes = {}  # {lot_name: QCheckBox}
 
         self._build_ui()
-        self._restore_settings()
-        self.showMaximized()  # 1920×1080 최대화 상태로 시작
+        self._restore_settings()  # 폴더 + 저장된 창 geometry 복원(또는 최대화)
 
     # ──────────────────────────────────────────────
     # Build UI
@@ -129,6 +128,16 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
     # ──────────────────────────────────────────────
     def closeEvent(self, event):
         self._save_settings()
+        # 실행 중인 백그라운드 로드 스레드 정리 —
+        # 'QThread: Destroyed while thread is still running' 크래시 방지.
+        thread = getattr(self, '_loader_thread', None)
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            if not thread.wait(3000):
+                # run()이 이벤트 루프 없이 CPU/IO 작업 중이라 quit()에 반응하지 않으면
+                # 종료 시점이므로 강제 종료로 destroy-while-running을 막는다.
+                thread.terminate()
+                thread.wait()
         import matplotlib.pyplot as plt
         plt.close('all')
         event.accept()
@@ -143,6 +152,16 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
         if self.folder_path and os.path.isdir(self.folder_path):
             self.path_edit.setText(self.folder_path)
             QTimer.singleShot(100, self._scan_folder)
+        self._restore_geometry()
+
+    def _restore_geometry(self):
+        """저장된 window_geometry("WxH+X+Y")를 복원. 없거나 손상 시 최대화."""
+        parsed = parse_geometry_string(self.settings.get('window_geometry', ''))
+        if parsed is not None:
+            x, y, w, h = parsed
+            self.setGeometry(x, y, w, h)
+            return
+        self.showMaximized()
 
     # ──────────────────────────────────────────────
     # Navigation

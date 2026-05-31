@@ -2,6 +2,8 @@
 stat_card.py — X/Y 축 통계 요약 카드
 """
 
+import math
+
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
 from ui.theme import BG2, FG, FG2, BG, GREEN, RED
@@ -85,7 +87,10 @@ class StatCard(QFrame):
         self.lbl_avg.setText(f"{avg:.3f}")
         self.lbl_rng.setText(f"{rng:.3f}")
         self.lbl_std.setText(f"{std:.3f}")
-        self.lbl_cpk.setText(f"{cpk:.2f}")
+        # Cpk: 계산 불가(σ=0 등)는 compute_cpk가 NaN을 반환 → 'N/A'로 표시하여
+        # 실제 Cpk 0.00(평균이 규격 한계에 위치)과 혼동되지 않게 한다.
+        cpk_unavailable = cpk is None or (isinstance(cpk, float) and math.isnan(cpk))
+        self.lbl_cpk.setText("N/A" if cpk_unavailable else f"{cpk:.2f}")
 
         # Spec 대비 표기
         rng_text, rng_color = self._format_spec_delta(rng, spec_r)

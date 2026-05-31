@@ -84,6 +84,22 @@ def save_settings(settings: dict):
         pass
 
 
+def parse_geometry_string(geo: str):
+    """저장된 창 geometry 문자열 "WxH+X+Y" → (x, y, w, h) 튜플.
+
+    빈 문자열이거나 형식이 손상된 경우 None을 반환한다(호출부는 None이면 최대화 등
+    폴백 동작을 수행). 음수 좌표("...+-5+50")도 split('+')로 3토막이 유지되어 처리된다.
+    """
+    if not geo:
+        return None
+    try:
+        size_part, x_str, y_str = geo.split('+')
+        w_str, h_str = size_part.split('x')
+        return int(x_str), int(y_str), int(w_str), int(h_str)
+    except (ValueError, AttributeError):
+        return None
+
+
 def add_recent_folder(settings: dict, folder_path: str) -> dict:
     """최근 폴더 추가 (최대 5개, 중복 제거)"""
     recents = settings.get('recent_folders', [])

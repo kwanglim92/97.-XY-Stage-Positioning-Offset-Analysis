@@ -33,14 +33,14 @@ class UIBuilderMixin:
         self.path_edit.setMaximumWidth(450)
         top.addWidget(self.path_edit)
 
-        btn_browse = QPushButton("Open")
-        btn_browse.clicked.connect(self._browse_folder)
-        top.addWidget(btn_browse)
+        self.btn_browse = QPushButton("Open")
+        self.btn_browse.clicked.connect(self._browse_folder)
+        top.addWidget(self.btn_browse)
 
-        btn_scan = QPushButton("Scan & Analysis")
-        btn_scan.setProperty("accent", True)
-        btn_scan.clicked.connect(self._scan_folder)
-        top.addWidget(btn_scan)
+        self.btn_scan = QPushButton("Scan & Analysis")
+        self.btn_scan.setProperty("accent", True)
+        self.btn_scan.clicked.connect(self._scan_folder)
+        top.addWidget(self.btn_scan)
 
         # Wafer 크기 선택 (200mm / 300mm)
         top.addSpacing(16)

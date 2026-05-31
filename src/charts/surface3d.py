@@ -62,7 +62,8 @@ class ColorBarWidget(QWidget):
         rect_x = 10
         rect_y = 30
 
-        # 그라데이션: 상단(빨강=양수 큰 값) → 중간(초록=0) → 하단(파랑=음수 큰 값)
+        # 그라데이션: 상단(빨강=z_max) → 중간(초록=[z_min,z_max] 중앙값) → 하단(파랑=z_min)
+        # 실제 컬러맵이 [z_min,z_max]로 정규화되므로 초록은 0이 아닌 '범위 중앙값'에 해당.
         gradient = QLinearGradient(rect_x, rect_y, rect_x, rect_y + rect_h)
         gradient.setColorAt(0.0, QColor(220, 50, 50))
         gradient.setColorAt(0.5, QColor(50, 200, 100))
@@ -76,8 +77,9 @@ class ColorBarWidget(QWidget):
         painter.setFont(font)
 
         text_x = rect_x + rect_w + 3
+        mid = (self.z_min + self.z_max) / 2.0  # 초록 띠(컬러맵 중앙)에 대응하는 실제 값
         painter.drawText(text_x, rect_y + 8, f"{self.z_max:+.2f}")
-        painter.drawText(text_x, rect_y + rect_h // 2 + 4, "0.00")
+        painter.drawText(text_x, rect_y + rect_h // 2 + 4, f"{mid:+.2f}")
         painter.drawText(text_x, rect_y + rect_h, f"{self.z_min:+.2f}")
 
 
@@ -269,7 +271,10 @@ class Surface3DWidget(QWidget):
         # 보간 그리드
         self.xi = np.linspace(min(self.xs) - 1, max(self.xs) + 1, 50)
         self.yi = np.linspace(min(self.ys) - 1, max(self.ys) + 1, 50)
-        Xi, Yi = np.meshgrid(self.xi, self.yi)
+        # indexing='ij' → Zi_grid 형상이 (len(xi), len(yi))가 되어
+        # GLSurfacePlotItem(x=xi, y=yi, z=Zi_grid)의 z[i,j]=f(x[i],y[j]) 계약과 일치한다.
+        # (기본 'xy'는 (len(yi), len(xi))로 전치되어 X/Y축이 뒤바뀜)
+        Xi, Yi = np.meshgrid(self.xi, self.yi, indexing='ij')
         self.Zi_grid = griddata((self.xs, self.ys), self.zs, (Xi, Yi), method='cubic')
         self.Zi_grid = np.nan_to_num(self.Zi_grid, nan=0.0)
 

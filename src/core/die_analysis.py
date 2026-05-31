@@ -61,11 +61,16 @@ def extract_die_positions(data: list) -> dict:
 def extract_die_number(site_id: str) -> Optional[int]:
     """Site ID에서 Die 번호 추출 (0-based).
     예: '0002_X000_Y000' → 패턴 ^\\d{2}(\\d{2})_ → 02 → 2-1 = 1
+
+    Site 번호가 00(예: '0100_...', '0000_...')이면 0-1 = -1이 되는데, 이는
+    유효한 Die 인덱스가 아니므로 None을 반환한다(음수 센티넬이 'Die0' 유령 die로
+    둔갑해 통계/좌표 인덱싱을 오염시키는 것을 방지).
     """
     import re
     m = re.match(r'^\d{2}(\d{2})_', str(site_id))
     if m:
-        return int(m.group(1)) - 1
+        n = int(m.group(1)) - 1
+        return n if n >= 0 else None
     return None
 
 
@@ -216,6 +221,32 @@ def compute_deviation_matrix(data: list, method: str = 'X',
     }
 
 
+def evaluate_deviation_pass(stats: dict, deviation: dict,
+                            spec_range: Optional[float],
+                            spec_stddev: Optional[float]) -> Optional[bool]:
+    """Spec 편차 기반 PASS/FAIL 판정 — 단일 출처(Single Source of Truth).
+
+    StepMixin(_compute_all_step_pass_states)과 CardMixin(_update_cards)이 동일 규칙을
+    각자 구현해 한쪽 가드만 어긋나면 다른 쪽이 크래시하던 문제를 막기 위해, 두 경로가
+    반드시 이 함수 하나만 호출하도록 통합한다.
+
+    Args:
+        stats: compute_statistics 결과 ('count' 키 사용)
+        deviation: compute_deviation_matrix 결과 ('overall_range', 'overall_stddev' 키)
+        spec_range: spec_deviation의 spec_range (None이면 미정의)
+        spec_stddev: spec_deviation의 spec_stddev (None이면 미정의)
+
+    Returns:
+        True(PASS) / False(FAIL) / None(데이터 없음 또는 spec 미정의 → '미분석')
+        spec_range/spec_stddev 중 하나라도 None이면 None을 반환해, 부분 spec에서
+        float<=None 비교로 TypeError가 나는 것을 원천 차단한다.
+    """
+    if stats.get('count', 0) == 0 or spec_range is None or spec_stddev is None:
+        return None
+    return (deviation['overall_range'] <= spec_range
+            and deviation['overall_stddev'] <= spec_stddev)
+
+
 def compute_xy_product(x_die_stats: list, y_die_stats: list) -> dict:
     """X_avg × Y_avg 곱 맵 데이터 (Contour 용).
     Returns: {die_label: x_avg * y_avg}
@@ -247,9 +278,17 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
             'residual_x': float, # X fitting residual RMS (µm)
             'residual_y': float, # Y fitting residual RMS (µm)
             'n_dies': int,
+            'degenerate': bool,  # True면 데이터 부족/공선으로 피팅 신뢰 불가 (모든 값 0)
         }
     """
     import numpy as np
+
+    def _degenerate(n=0):
+        """피팅 불가(데이터 부족/공선) 시 0으로 채운 결과 + degenerate 플래그."""
+        return {'tx': 0, 'ty': 0, 'sx_ppm': 0, 'sy_ppm': 0,
+                'theta_deg': 0, 'theta_urad': 0,
+                'residual_x': 0, 'residual_y': 0, 'n_dies': n,
+                'degenerate': True}
 
     # Build position and offset arrays
     x_map = {ds['die']: ds['avg'] for ds in x_die_stats}
@@ -257,9 +296,7 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
     common = sorted(set(x_map.keys()) & set(y_map.keys()))
 
     if len(common) < 3:
-        return {'tx': 0, 'ty': 0, 'sx_ppm': 0, 'sy_ppm': 0,
-                'theta_deg': 0, 'theta_urad': 0,
-                'residual_x': 0, 'residual_y': 0, 'n_dies': 0}
+        return _degenerate()
 
     positions = []
     dx_vals = []
@@ -274,9 +311,7 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
 
     n = len(positions)
     if n < 3:
-        return {'tx': 0, 'ty': 0, 'sx_ppm': 0, 'sy_ppm': 0,
-                'theta_deg': 0, 'theta_urad': 0,
-                'residual_x': 0, 'residual_y': 0, 'n_dies': 0}
+        return _degenerate(n)
 
     xs = np.array([p[0] for p in positions], dtype=float)
     ys = np.array([p[1] for p in positions], dtype=float)
@@ -286,13 +321,19 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
     # --- Solve for X: dx = Tx + Sx * x - Theta * y ---
     #   A_x @ [Tx, Sx, -Theta]^T = dx
     A_x = np.column_stack([np.ones(n), xs, -ys])
-    sol_x, res_x, _, _ = np.linalg.lstsq(A_x, dx, rcond=None)
+    sol_x, res_x, rank_x, _ = np.linalg.lstsq(A_x, dx, rcond=None)
     tx, sx, neg_theta_x = sol_x
 
     # --- Solve for Y: dy = Ty + Sy * y + Theta * x ---
     A_y = np.column_stack([np.ones(n), ys, xs])
-    sol_y, res_y, _, _ = np.linalg.lstsq(A_y, dy, rcond=None)
+    sol_y, res_y, rank_y, _ = np.linalg.lstsq(A_y, dy, rcond=None)
     ty, sy, theta_y = sol_y
+
+    # 랭크 결손(공선 Die 등) → lstsq가 예외 없이 임의 최소노름 해를 반환하므로
+    # Theta/Scaling이 무의미한 값으로 채워진다. degenerate로 표시해 호출부가
+    # 회전/스케일을 신뢰하지 않도록 한다.
+    if rank_x < 3 or rank_y < 3:
+        return _degenerate(n)
 
     # Average theta from both equations
     theta_rad = (neg_theta_x + theta_y) / 2.0
@@ -313,6 +354,7 @@ def compute_affine_transform(x_die_stats: list, y_die_stats: list) -> dict:
         'residual_x': round(res_rms_x, 4),
         'residual_y': round(res_rms_y, 4),
         'n_dies': n,
+        'degenerate': False,
     }
 
 

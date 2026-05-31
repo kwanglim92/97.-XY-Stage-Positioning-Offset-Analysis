@@ -17,7 +17,9 @@ except ImportError:
 def _decode_ascii(field_value):
     """uint16/int16 배열을 문자열로 변환"""
     if isinstance(field_value, list):
-        return ''.join(chr(c) for c in field_value if c != 0)
+        # int16 부호 확장된 음수/범위 초과 값에 chr()이 ValueError를 내는 것을 방지:
+        # 0xFFFF 마스크로 부호 있는 값을 유효 코드 유닛(0~0xFFFF)으로 환원.
+        return ''.join(chr(c & 0xFFFF) for c in field_value if (c & 0xFFFF) != 0)
     return str(field_value)
 
 
@@ -84,7 +86,8 @@ def get_tiff_info(reader) -> dict:
         if val is None:
             return ''
         if isinstance(val, list):
-            return ''.join(chr(c) for c in val if c != 0)
+            # int16 음수/범위 초과 값에 chr() ValueError 방지 — 0xFFFF 마스크.
+            return ''.join(chr(c & 0xFFFF) for c in val if (c & 0xFFFF) != 0)
         return str(val)
 
     categories = {0: '2D Image', 1: 'Line Profile', 2: 'Spectroscopy'}

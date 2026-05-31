@@ -68,9 +68,11 @@ def scan_recipes(root_path: str) -> list:
                     })
 
         if rounds:
-            # 인덱스 추출 (폴더명 앞의 숫자)
+            # 인덱스 추출 (폴더명 앞의 숫자). 번호 없는 폴더는 큰 센티넬로 뒤에 배치
+            # (발견 순서 유지). 최종 index는 정렬 후 1..N으로 재부여하므로 여기서의
+            # 중복/충돌은 표시 번호에 영향을 주지 않는다.
             idx_match = re.match(r'^(\d+)', name)
-            idx = int(idx_match.group(1)) if idx_match else len(recipes) + 1
+            idx = int(idx_match.group(1)) if idx_match else 10 ** 6 + len(recipes)
 
             # 짧은 이름 생성
             short = re.sub(r'^\d+\.\s*', '', name).strip()
@@ -86,6 +88,9 @@ def scan_recipes(root_path: str) -> list:
             })
 
     recipes.sort(key=lambda x: x['index'])
+    # 정렬 후 1..N 연속 번호로 재부여 → Step 라벨 유일성·연속성 보장
+    for i, r in enumerate(recipes):
+        r['index'] = i + 1
     return recipes
 
 

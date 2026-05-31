@@ -29,7 +29,8 @@ ROW_R, ROW_N, ROW_MEAN, ROW_STDDEV, ROW_MIN, ROW_MAX, ROW_CV, ROW_OUT = range(8,
 
 class TableMixin:
     def _update_summary_table(self, comparison, recipe_results=None):
-        from core import compute_deviation_matrix, filter_stabilization_die
+        from core import (compute_deviation_matrix, filter_stabilization_die,
+                          compute_statistics, filter_by_method, evaluate_deviation_pass)
         t = self.sum_table
         recipe_results = recipe_results or []
         dev_spec = self.settings.get('spec_deviation', {})
@@ -73,11 +74,13 @@ class TableMixin:
                 x_std   = dx.get('overall_stddev')
                 y_range = dy.get('overall_range')
                 y_std   = dy.get('overall_stddev')
-                if spec_r is not None and spec_s is not None:
-                    if x_range is not None:
-                        px = (x_range <= spec_r) and (x_std <= spec_s)
-                    if y_range is not None:
-                        py = (y_range <= spec_r) and (y_std <= spec_s)
+                # PASS/FAIL은 core.evaluate_deviation_pass 단일 출처 사용.
+                # 축별 count로 판정하므로 한 축 데이터가 없으면(예: Y 미측정)
+                # overall_range=0으로 인한 허위 PASS 대신 None('—')이 된다.
+                sx = compute_statistics(filter_by_method(data, 'X'))
+                sy = compute_statistics(filter_by_method(data, 'Y'))
+                px = evaluate_deviation_pass(sx, dx, spec_r, spec_s)
+                py = evaluate_deviation_pass(sy, dy, spec_r, spec_s)
 
             def _chk_item(val, spec):
                 """체크리스트 수치 셀 — 값만, Spec 초과면 빨간 배경, 볼드."""

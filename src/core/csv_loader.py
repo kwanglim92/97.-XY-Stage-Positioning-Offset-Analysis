@@ -26,7 +26,7 @@ def _read_file_bytes(file_path: str) -> bytes:
     기업 DLP 정책으로 Python open()이 PermissionError를 일으킬 때
     xcopy로 임시 파일 복사 후 읽기.
     """
-    import subprocess, tempfile
+    import subprocess, tempfile, logging
 
     # 1차: 직접 읽기
     try:
@@ -35,19 +35,26 @@ def _read_file_bytes(file_path: str) -> bytes:
     except PermissionError:
         pass  # DLP 차단 → xcopy 폴백
 
-    # 2차: xcopy 폴백
+    # 2차: xcopy 폴백 — 고유 임시파일(mkstemp) + finally로 항상 정리.
+    #   고정 경로(pid+basename)는 동일 파일명 폴더 간 충돌·예외 시 잔존 위험이 있어
+    #   mkstemp로 대체한다. 실패는 logging으로 남겨 빈 bytes가 조용히 반환되지 않게 한다.
+    fd, tmp = tempfile.mkstemp(prefix='_xy_net_',
+                               suffix='_' + os.path.basename(file_path))
+    os.close(fd)
     try:
-        tmp = os.path.join(tempfile.gettempdir(),
-                           f'_xy_net_{os.getpid()}_{os.path.basename(file_path)}')
         r = subprocess.run(['xcopy', file_path, tmp + '*', '/Y'],
                            capture_output=True, timeout=15)
         if r.returncode == 0 and os.path.isfile(tmp):
             with open(tmp, 'rb') as f:
-                data = f.read()
+                return f.read()
+        logging.warning("xcopy 폴백 실패 (rc=%s): %s", r.returncode, file_path)
+    except Exception as e:
+        logging.warning("xcopy 폴백 오류 (%s): %s", e, file_path)
+    finally:
+        try:
             os.remove(tmp)
-            return data
-    except Exception:
-        pass
+        except OSError:
+            pass
 
     return b''
 
