@@ -3,6 +3,7 @@ import numpy as np
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QMessageBox
 from core.die_analysis import get_die_position
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from ui.widgets.chart_widget import sync_canvas_dpi
 
 class RepeatContourDialog(QDialog):
     def __init__(self, parent=None, axis='X', dev_data=None, dyn_positions=None):
@@ -116,3 +117,5 @@ class RepeatContourDialog(QDialog):
         toolbar = NavigationToolbar2QT(canvas, self)
         layout.addWidget(toolbar)
         layout.addWidget(canvas)
+        # build-once 캔버스: 화면 DPI에 한 번 동기화 (pattern d)
+        sync_canvas_dpi(canvas)

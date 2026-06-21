@@ -1,6 +1,7 @@
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QStyle
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from ui.widgets.chart_widget import sync_canvas_dpi
 import charts as viz
 from core import filter_stabilization_die
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
@@ -124,6 +125,8 @@ class DieFilterMixin:
         canvas.setStyleSheet("border: none;")
         self._mini_map_layout.addWidget(canvas)
         self._mini_map_canvas = canvas
+        # 캔버스를 새로 만들 때마다 화면 DPI에 동기화 (pattern d)
+        sync_canvas_dpi(canvas)
 
         # pick_event 연결 — Die 원 클릭 시 체크박스 토글
         canvas.mpl_connect('pick_event', self._on_mini_map_pick)

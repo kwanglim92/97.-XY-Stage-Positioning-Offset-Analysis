@@ -488,7 +488,9 @@ def plot_vector_map(x_die_stats: list, y_die_stats: list,
     import matplotlib.cm as cm
     import matplotlib.colorbar
 
-    fig, ax = plt.subplots(figsize=(7, 7), dpi=110)
+    # dpi는 캔버스 부착 시 화면 논리 DPI로 동기화됨(sync_canvas_dpi, pattern d).
+    # 여기서 고정 dpi를 박지 않는다 — 디스플레이마다 물리 크기가 달라지는 원인.
+    fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor('#1e1e2e')
     ax.set_facecolor('#1e1e2e')
 

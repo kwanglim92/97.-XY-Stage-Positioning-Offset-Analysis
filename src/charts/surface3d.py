@@ -44,7 +44,9 @@ def poly2d_2d(xy, a, b, c, d, e, f):
 class ColorBarWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(60)
+        # pattern c: 고정 폭 대신 범위 — 고DPI에서 z_min/z_max 라벨이 잘리지 않게
+        self.setMinimumWidth(60)
+        self.setMaximumWidth(90)
         self.z_min = -1.0
         self.z_max = 1.0
 

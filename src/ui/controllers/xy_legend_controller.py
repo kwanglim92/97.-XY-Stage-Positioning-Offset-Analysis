@@ -47,7 +47,7 @@ class XYLegendMixin:
             color = _DIE_COLORS[idx % len(_DIE_COLORS)]
 
             btn = QPushButton(f"■ {die_label}")
-            btn.setFixedHeight(28)
+            btn.setMinimumHeight(28)   # pattern c: 9pt 텍스트가 고DPI에서 잘리지 않게
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(f"""
                 QPushButton {{ background: transparent; color: {color};

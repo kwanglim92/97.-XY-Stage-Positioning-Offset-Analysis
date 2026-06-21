@@ -151,7 +151,7 @@ class UIBuilderMixin:
         filter_header.addWidget(self._die_expand_btn)
 
         self.die_select_all_btn = QPushButton("✅ Select All")
-        self.die_select_all_btn.setFixedHeight(22)
+        self.die_select_all_btn.setMinimumHeight(22)
         self.die_select_all_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {FG2}; border: none;
                           border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
@@ -161,7 +161,7 @@ class UIBuilderMixin:
         filter_header.addWidget(self.die_select_all_btn)
 
         self.die_stab_btn = QPushButton("🚫 Exclude Stabilization Die")
-        self.die_stab_btn.setFixedHeight(22)
+        self.die_stab_btn.setMinimumHeight(22)
         self.die_stab_btn.setToolTip(
             "처음 측정된 Die를 자동으로 체크 해제합니다.\n"
             "장비 안정화 목적으로 첫 Die를 이중 측정한 경우 사용하세요.")
@@ -187,7 +187,10 @@ class UIBuilderMixin:
 
         # 펼친 상태: 고정 300px, 좌(미니맵) + 우(그리드 체크박스)
         self._die_expanded_panel = QWidget()
-        self._die_expanded_panel.setFixedHeight(300)
+        # pattern c: 고정 높이 대신 유연한 범위 — 짧은 화면에서 줄어들 수 있게
+        # (내부 die-grid는 _die_grid_scroll로 이미 스크롤 처리됨)
+        self._die_expanded_panel.setMinimumHeight(180)
+        self._die_expanded_panel.setMaximumHeight(360)
         self._die_expanded_panel.setStyleSheet("border: none;")
         self._die_expanded_panel.setVisible(False)
         exp_layout = QHBoxLayout(self._die_expanded_panel)
@@ -260,7 +263,9 @@ class UIBuilderMixin:
         self.sum_table.setVerticalHeaderLabels(SUMMARY_ROW_LABELS)
         vhdr = self.sum_table.verticalHeader()
         vhdr.setVisible(True)
-        vhdr.setFixedWidth(148)
+        # pattern c: 고정 폭 대신 최소 폭 — 세로 헤더는 라벨 길이에 맞춰 자동 산정되며
+        # 폰트 배율이 커지면 늘어나고, 작아도 148px 아래로는 줄지 않는다(현재 폭 유지).
+        vhdr.setMinimumWidth(148)
         vhdr.setDefaultSectionSize(24)
         for _grp_row in SUMMARY_GROUP_HEADER_ROWS:
             self.sum_table.setRowHeight(_grp_row, 26)
@@ -332,7 +337,21 @@ class UIBuilderMixin:
         raw_layout.addWidget(self.raw_table, 1)
         self.data_tabs.addTab(raw_widget, "Raw Data")
 
-        splitter.addWidget(left)
+        # Cross-display (pattern c): 좌측 컨트롤 컬럼을 QScrollArea로 감싸 짧은/배율
+        # 화면에서 세로 콘텐츠가 잘리지 않게 한다(특히 Die 필터 확장 시).
+        # 단, QScrollArea의 minimumSizeHint(~68px)는 내부 위젯의 자연 최소폭을
+        # 물려받지 않으므로, 내부 컨텐츠 최소폭(측정값 ≈710px)을 명시해 스플리터
+        # 핸들로 좁혀도 우측 컨트롤이 잘려 사라지지 않게 한다(기존 가로 동작 유지).
+        # 가로 스크롤은 AsNeeded — 폰트 배율 등으로 컨텐츠가 더 넓어질 때만 노출.
+        left_scroll = QScrollArea()
+        left_scroll.setWidget(left)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # 빌드 시점 스냅샷. 이후 폰트 배율 등으로 컨텐츠가 더 넓어지면 minimumWidth는
+        # 재계산되지 않지만, 위의 AsNeeded 가로 스크롤이 안전망 역할을 한다.
+        left_scroll.setMinimumWidth(max(710, left.minimumSizeHint().width()))
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        splitter.addWidget(left_scroll)
 
         # ════════════ RIGHT PANEL (2-Tier Grouped Tabs) ════════════
         right = QWidget()
@@ -474,7 +493,7 @@ class UIBuilderMixin:
         self.vector_show_values_btn = QPushButton("📐 Show Values")
         self.vector_show_values_btn.setCheckable(True)
         self.vector_show_values_btn.setChecked(False)
-        self.vector_show_values_btn.setFixedHeight(24)
+        self.vector_show_values_btn.setMinimumHeight(24)
         self.vector_show_values_btn.setToolTip(
             "ON: 각 화살표 옆에 편차 크기(µm)를 표시합니다\n"
             "OFF: 패턴/방향 파악에 집중합니다")
@@ -559,7 +578,7 @@ class UIBuilderMixin:
         lt_toolbar.addWidget(lt_lbl)
 
         self._lot_select_all_btn = QPushButton("✅ Select All")
-        self._lot_select_all_btn.setFixedHeight(22)
+        self._lot_select_all_btn.setMinimumHeight(22)
         self._lot_select_all_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {FG2}; border: none;
                           border-radius: 3px; padding: 0 8px; font-size: 8pt; }}
@@ -569,7 +588,7 @@ class UIBuilderMixin:
         lt_toolbar.addWidget(self._lot_select_all_btn)
 
         self._lot_range_btn = QPushButton("Set Range")
-        self._lot_range_btn.setFixedHeight(22)
+        self._lot_range_btn.setMinimumHeight(22)
         self._lot_range_btn.setToolTip(
             "표시할 Lot 범위를 지정합니다.\n"
             "예: 1-5 (처음 5개), -3 (마지막 3개)")
@@ -617,7 +636,7 @@ class UIBuilderMixin:
         # Log 스케일 토글 버튼
         self._xy_log_btn = QPushButton("Log Scale")
         self._xy_log_btn.setCheckable(True)
-        self._xy_log_btn.setFixedHeight(22)
+        self._xy_log_btn.setMinimumHeight(22)
         self._xy_log_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {FG2}; border: none;
                           border-radius: 3px; padding: 0 10px; font-size: 8pt; }}
@@ -642,7 +661,10 @@ class UIBuilderMixin:
 
         # 사이드 범례 패널
         self._xy_legend_panel = QWidget()
-        self._xy_legend_panel.setFixedWidth(120)
+        # pattern c: 고정 폭 대신 범위 — 고DPI에서 '■ DieNN' 텍스트가 잘리지 않게.
+        # xs_body에서 차트가 stretch 7이므로 범례는 110~200 내에서만 폭을 흡수.
+        self._xy_legend_panel.setMinimumWidth(110)
+        self._xy_legend_panel.setMaximumWidth(200)
         self._xy_legend_panel.setStyleSheet(f"background: {BG2};")
         legend_vbox = QVBoxLayout(self._xy_legend_panel)
         legend_vbox.setContentsMargins(4, 4, 4, 4)
@@ -650,7 +672,7 @@ class UIBuilderMixin:
 
         # [전체 표시] 리셋 버튼
         self._xy_legend_reset_btn = QPushButton("Show All")
-        self._xy_legend_reset_btn.setFixedHeight(22)
+        self._xy_legend_reset_btn.setMinimumHeight(22)
         self._xy_legend_reset_btn.setStyleSheet(f"""
             QPushButton {{ background: {BG3}; color: {ACCENT}; border: none;
                           border-radius: 3px; font-size: 8pt; font-weight: bold; }}
@@ -894,7 +916,9 @@ class UIBuilderMixin:
 
         # ─── 좌측 패널 토글 (F11 + 스플리터 더블클릭) ───
         self._main_splitter = splitter
-        self._left_panel = left
+        # 좌측 패널 핸들 보관(스크롤 wrapper). F11/더블클릭 토글은 _toggle_left_panel에서
+        # 스플리터 sizes로 동작하므로 이 참조 자체를 읽지는 않는다.
+        self._left_panel = left_scroll
         self._saved_splitter_sizes = None
 
         shortcut = QShortcut(QKeySequence('F11'), self)

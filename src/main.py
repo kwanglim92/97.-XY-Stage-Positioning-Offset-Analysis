@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QSizePolicy, QStatusBar, QScrollArea, QTextEdit,
     QListWidget, QTextBrowser, QDialogButtonBox, QStyle,
 )
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QRect
-from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QRect, QPoint
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QGuiApplication
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 import matplotlib
@@ -85,8 +85,10 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
     def __init__(self):
         super().__init__()
         self.setWindowTitle("📊 XY Stage Offset Analyzer — Workflow")
-        self.setMinimumSize(1280, 860)
-        self.resize(1600, 1050)
+        # Cross-display: keep the floor small enough for a DPI-scaled laptop
+        # (1920×1080 @150% = 1280×720 logical). Initial sizing is delegated to
+        # the geometry-restore / fit-to-screen path in _restore_geometry().
+        self.setMinimumSize(1024, 640)
 
         # State
         self.settings = load_settings()
@@ -155,19 +157,63 @@ class DataAnalyzerApp(UIBuilderMixin, QMainWindow, ScanMixin, StepMixin, CardMix
         self._restore_geometry()
 
     def _restore_geometry(self):
-        """저장된 window_geometry("WxH+X+Y")를 복원. 없거나 손상 시 최대화."""
+        """저장된 window_geometry("WxH+X+Y")를 현재 화면 범위로 클램프해 복원.
+
+        다른 모니터(해상도/DPI 배율이 다른)에서 저장된 geometry를 그대로 복원하면
+        창이 화면 밖으로 나가거나 화면보다 커질 수 있다. 저장된 위치가 속한 화면의
+        availableGeometry()에 맞춰 크기/위치를 클램프한다. 저장값이 없으면
+        화면에 맞춰 중앙 배치(_fit_to_screen).
+        """
         parsed = parse_geometry_string(self.settings.get('window_geometry', ''))
         if parsed is not None:
             x, y, w, h = parsed
-            self.setGeometry(x, y, w, h)
+            screen = (QGuiApplication.screenAt(QPoint(x, y))
+                      or QGuiApplication.primaryScreen())
+            if screen is not None:
+                avail = screen.availableGeometry()
+                # 화면(작업영역)이 최소 크기보다 작으면 클램프해도 넘치므로
+                # 최대화로 폴백(_fit_to_screen). (skill common-mistake #5)
+                if (avail.width() >= self.minimumWidth()
+                        and avail.height() >= self.minimumHeight()):
+                    # 화면보다 크지 않게 + 최소 크기 보장
+                    w = max(min(w, avail.width()), self.minimumWidth())
+                    h = max(min(h, avail.height()), self.minimumHeight())
+                    # 타이틀바가 화면 밖으로 나가지 않도록 위치 클램프
+                    x = max(avail.x(), min(x, avail.x() + avail.width() - w))
+                    y = max(avail.y(), min(y, avail.y() + avail.height() - h))
+                    self.setGeometry(x, y, w, h)
+                    return
+        self._fit_to_screen()
+
+    def _fit_to_screen(self, ratio=0.85, cap=(1600, 1050)):
+        """창을 현재 화면 작업영역의 ratio 비율로(최대 cap) 중앙 배치.
+
+        화면(작업영역)이 최소 크기보다 작으면 최대화로 폴백한다.
+        """
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
             return
-        self.showMaximized()
+        avail = screen.availableGeometry()
+        if avail.width() < self.minimumWidth() or avail.height() < self.minimumHeight():
+            self.showMaximized()
+            return
+        w = max(min(int(avail.width() * ratio), cap[0]), self.minimumWidth())
+        h = max(min(int(avail.height() * ratio), cap[1]), self.minimumHeight())
+        self.resize(w, h)
+        self.move(avail.x() + (avail.width() - w) // 2,
+                  avail.y() + (avail.height() - h) // 2)
 
     # ──────────────────────────────────────────────
     # Navigation
     # ──────────────────────────────────────────────
 def main():
+    # Cross-display High-DPI: MUST run before the QApplication instance exists,
+    # or it is silently ignored. PassThrough keeps crisp fractional scaling (×1.5).
+    if QApplication.instance() is None:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
+    app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app.setStyle("Fusion")
     app.setStyleSheet(DARK_STYLE)
     window = DataAnalyzerApp()
