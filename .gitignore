@@ -11,3 +11,6 @@ build/
 dist/
 .pytest_cache/
 /XYStageOffset.spec
+
+# OMC(에이전트) 도구 상태
+.omc/
