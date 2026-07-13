@@ -1,86 +1,145 @@
 """
-settings.py — 설정 저장/로드 (JSON)
+settings.py — settings.json 기반 설정 저장/로드
 
-사용자 설정을 앱 로컬 디렉토리에 JSON으로 저장
+빌드 시 src/core/settings.json을 onefile EXE에 포함하고, 해당 파일의 스펙을
+항상 기준으로 사용한다. 빌드본의 사용자 환경설정은 Windows 레지스트리에
+저장하므로 외부 settings.json 파일은 생성하지 않는다.
 """
 
-import os
 import json
+import os
+import sys
 
-# 설정 파일 경로 (이 모듈과 같은 src/core/ 폴더에 저장)
-SETTINGS_DIR = os.path.dirname(os.path.abspath(__file__))
-SETTINGS_FILE = os.path.join(SETTINGS_DIR, 'settings.json')
+try:
+    import winreg
+except ImportError:  # Windows 이외의 개발/테스트 환경
+    winreg = None
 
-DEFAULT_SETTINGS = {
-    'last_folder': '',
-    'last_axis': 'both',
-    'use_all_range': True,
-    'last_range_start': '',
-    'last_range_end': '',
-    'outlier_method': 'iqr',
-    'outlier_threshold': 1.5,
-    'export_delimiter': '\t',
-    'window_geometry': '',
-    'recent_folders': [],  # 최근 5개 폴더 기록
-    'spec_limits': {
-        'Vision Pattern Recognize': {'X': {'lsl': -5000.0, 'usl': 5000.0}, 'Y': {'lsl': -5000.0, 'usl': 5000.0}},
-        'In-Die Align': {'X': {'lsl': -5000.0, 'usl': 5000.0}, 'Y': {'lsl': -5000.0, 'usl': 5000.0}},
-        'LLC Translation': {'X': {'lsl': -5000.0, 'usl': 5000.0}, 'Y': {'lsl': -5000.0, 'usl': 5000.0}},
-        'Global Align': {'X': {'lsl': -5000.0, 'usl': 5000.0}, 'Y': {'lsl': -5000.0, 'usl': 5000.0}}
-    },
-    'spec_deviation': {
-        'Vision Pattern Rec…': {'spec_range': 4.0, 'spec_stddev': 0.8},
-        'In-Die Align':       {'spec_range': 4.0, 'spec_stddev': 0.8},
-        'LLC Translation':    {'spec_range': 4.0, 'spec_stddev': 0.8},
-        'Global Align':       {'spec_range': 7.5, 'spec_stddev': 2.2},
-    },
-    'standard_recipe_names': [
-        'Vision Pattern',
-        'In-Die Align',
-        'LLC Translation',
-        'Global Align',
-    ],
-    'wafer_size': 300,  # 웨이퍼 크기 (mm): 200 또는 300
+IS_FROZEN = getattr(sys, 'frozen', False)
+
+
+def _resolve_bundled_settings_file() -> str:
+    """소스 또는 PyInstaller onefile 내부의 settings.json 경로를 반환한다."""
+    if IS_FROZEN and hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, 'core', 'settings.json')
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+
+
+BUNDLED_SETTINGS_FILE = _resolve_bundled_settings_file()
+
+_REGISTRY_PATH = r'Software\XYStageOffset'
+_USER_SETTING_KEYS = {
+    'last_folder',
+    'window_geometry',
+    'recent_folders',
+    'wafer_size',
 }
 
 
-# 매 실행 시 코드 기본값을 우선 사용하는 키 (코드 업데이트 시 자동 반영)
-_ALWAYS_DEFAULT_KEYS = {'standard_recipe_names'}
+def _read_settings_file(file_path: str) -> dict:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-# 매 실행 시 리셋되는 키 (세션 비유지)
-_RESET_ON_START_KEYS = {'last_folder'}
+
+def _write_settings_file(file_path: str, settings: dict):
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+
+
+def _read_registry_settings() -> dict:
+    """HKCU에서 빌드본 사용자 환경설정을 읽는다."""
+    if winreg is None:
+        return {}
+
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REGISTRY_PATH)
+    except OSError:
+        return {}
+
+    settings = {}
+    with key:
+        for name in _USER_SETTING_KEYS:
+            try:
+                value, _ = winreg.QueryValueEx(key, name)
+            except OSError:
+                continue
+
+            if name == 'recent_folders':
+                try:
+                    value = json.loads(value)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(value, list):
+                    continue
+            elif name == 'wafer_size':
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+            settings[name] = value
+    return settings
+
+
+def _write_registry_settings(settings: dict):
+    """허용된 사용자 환경설정만 HKCU에 저장한다."""
+    if winreg is None:
+        return
+
+    try:
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _REGISTRY_PATH)
+        with key:
+            for name in _USER_SETTING_KEYS:
+                if name not in settings:
+                    continue
+                value = settings[name]
+                if name == 'recent_folders':
+                    value = json.dumps(value, ensure_ascii=False)
+                    value_type = winreg.REG_SZ
+                elif name == 'wafer_size':
+                    value = int(value)
+                    value_type = winreg.REG_DWORD
+                else:
+                    value = str(value)
+                    value_type = winreg.REG_SZ
+                winreg.SetValueEx(key, name, 0, value_type, value)
+    except (OSError, TypeError, ValueError):
+        pass
 
 
 def load_settings() -> dict:
-    """설정 파일 로드 (3단계 병합)
+    """내장 settings.json을 기준으로 사용자 환경설정을 병합한다.
 
-    1. DEFAULT_SETTINGS 기본값으로 시작
-    2. 저장된 settings.json에서 persistent 키만 병합
-    3. _ALWAYS_DEFAULT_KEYS → 코드 기본값 강제
-    4. _RESET_ON_START_KEYS → 기본값으로 리셋
+    소스 실행은 JSON을 그대로 사용한다. onefile 빌드본은 EXE에 포함된 JSON의
+    스펙을 사용하고, Windows 레지스트리의 사용자 설정만 제한적으로 병합한다.
     """
-    settings = DEFAULT_SETTINGS.copy()
+    try:
+        bundled = _read_settings_file(BUNDLED_SETTINGS_FILE)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                saved = json.load(f)
-            # persistent 키만 병합 (always-default, reset 키 제외)
-            for k, v in saved.items():
-                if k not in _ALWAYS_DEFAULT_KEYS and k not in _RESET_ON_START_KEYS:
-                    settings[k] = v
-        except (json.JSONDecodeError, IOError):
-            pass
+    if not IS_FROZEN:
+        return bundled
 
+    settings = bundled.copy()
+    for key, value in _read_registry_settings().items():
+        if key in _USER_SETTING_KEYS:
+            settings[key] = value
     return settings
 
 
 def save_settings(settings: dict):
     """설정 파일 저장"""
+    if IS_FROZEN:
+        user_settings = {
+            key: value for key, value in settings.items()
+            if key in _USER_SETTING_KEYS
+        }
+        _write_registry_settings(user_settings)
+        return
+
     try:
-        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(settings, f, indent=2, ensure_ascii=False)
-    except IOError:
+        _write_settings_file(BUNDLED_SETTINGS_FILE, settings)
+    except OSError:
         pass
 
 

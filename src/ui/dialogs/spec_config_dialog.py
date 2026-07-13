@@ -51,9 +51,13 @@ class SpecConfigDialog(QDialog):
         t_lim.resizeRowsToContents()
         layout.addWidget(t_lim)
 
-        # 파일 경로 안내 — 실제 저장 위치(core.settings.SETTINGS_FILE)를 그대로 표시
-        from core.settings import SETTINGS_FILE
-        lbl_path = QLabel(SETTINGS_FILE)
+        # 스펙 기준 안내 — 빌드본은 EXE에 포함된 settings.json을 사용
+        from core.settings import BUNDLED_SETTINGS_FILE, IS_FROZEN
+        if IS_FROZEN:
+            spec_source = "Spec source: Embedded in XYStageOffset.exe"
+        else:
+            spec_source = BUNDLED_SETTINGS_FILE
+        lbl_path = QLabel(spec_source)
         lbl_path.setStyleSheet(f"color: {FG2}; font-size: 8pt; margin-top: 8px;")
         lbl_path.setWordWrap(True)
         layout.addWidget(lbl_path)

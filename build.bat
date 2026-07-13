@@ -24,6 +24,7 @@ python -m PyInstaller ^
     --workpath build ^
     --specpath build ^
     --add-data "%PROJECT_DIR%src\assets;src\assets" ^
+    --add-data "%PROJECT_DIR%src\core\settings.json;core" ^
     --collect-all pspylib ^
     --hidden-import=src.core ^
     --hidden-import=src.ui ^
@@ -36,6 +37,9 @@ if %ERRORLEVEL% neq 0 (
     pause
     exit /b 1
 )
+
+REM 이전 버전이 생성한 외부 설정 파일 제거 — 배포 결과는 EXE 하나만 유지
+if exist "%PROJECT_DIR%dist\settings.json" del /q "%PROJECT_DIR%dist\settings.json"
 
 echo.
 echo ============================================
