@@ -3,6 +3,7 @@ analyzer.py — 통계·트렌드·이상치 분석 엔진
 """
 
 import math
+import logging
 from typing import Optional
 
 
@@ -168,6 +169,25 @@ def filter_by_method(data: list, method: str) -> list:
 def filter_valid_only(data: list) -> list:
     """Valid=TRUE 데이터만 필터링"""
     return [r for r in data if r.get('valid', True)]
+
+
+def drop_non_finite(values, context: str = '') -> list:
+    """NaN / ±inf 등 비유한 값을 제거한다 (제거가 있었으면 경고).
+
+    측정 실패 행은 보통 Valid=FALSE로 표시돼 filter_valid_only에서 걸러지지만,
+    장비·버전에 따라 Valid=TRUE인 채 값만 NaN인 경우가 있을 수 있다.
+    CSV의 'NaN' 문자열은 float()이 그대로 받아들이므로 파싱 단계에서도 걸리지 않는다.
+    값 하나 때문에 차트·통계가 통째로 깨지지 않도록 두는 최종 방어선이다.
+    (np.histogram은 NaN이 하나만 있어도 범위 계산이 nan이 되어 전체가 실패한다)
+
+    계측 SW이므로 조용히 버리지 않고 몇 개를 제외했는지 반드시 남긴다.
+    """
+    finite = [v for v in values if isinstance(v, (int, float)) and math.isfinite(v)]
+    dropped = len(values) - len(finite)
+    if dropped:
+        logging.warning("비유한 값 %d개 제외%s", dropped,
+                        f' ({context})' if context else '')
+    return finite
 
 
 def compute_repeatability(data: list, metric_key: str = 'value') -> dict:

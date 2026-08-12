@@ -2,7 +2,7 @@ from PySide6.QtCore import QTimer
 import charts as viz
 import charts as viz_pg
 from core import compute_deviation_matrix, compute_xy_product, extract_die_positions
-from core import compute_statistics, filter_by_method
+from core import compute_statistics, filter_by_method, filter_valid_only
 from core import compute_pareto_data, compute_correlation
 from core.settings import save_settings
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
@@ -25,19 +25,17 @@ class ChartMixin:
         except Exception as e:
             self.logger.error(f"Lot 트렌드 차트 오류: {e}")
 
-        try:
-            x_data = [r for r in data if r.get('method') == 'X']
-            self.chart_widgets['Distribution X'].set_widget(
-                viz_pg.create_histogram_widget(x_data, title=f'{short} X Distribution'))
-        except Exception as e:
-            self.logger.error(f"분포 X 차트 오류: {e}")
-
-        try:
-            y_data = [r for r in data if r.get('method') == 'Y']
-            self.chart_widgets['Distribution Y'].set_widget(
-                viz_pg.create_histogram_widget(y_data, title=f'{short} Y Distribution'))
-        except Exception as e:
-            self.logger.error(f"분포 Y 차트 오류: {e}")
+        # 통계(compute_statistics)·편차행렬(compute_deviation_matrix)과 동일한
+        # 유효성 기준을 적용한다. 측정 실패 행(Valid=FALSE)은 값이 NaN으로 기록되므로,
+        # 여기서 거르지 않으면 분포 차트만 다른 데이터를 보게 된다.
+        for axis, key in (('X', 'Distribution X'), ('Y', 'Distribution Y')):
+            try:
+                axis_data = filter_valid_only(filter_by_method(data, axis))
+                self.chart_widgets[key].set_widget(
+                    viz_pg.create_histogram_widget(
+                        axis_data, title=f'{short} {axis} Distribution'))
+            except Exception as e:
+                self.logger.error(f"분포 {axis} 차트 오류: {e}")
 
         # Spec Range 가이드 박스용 스펙 가져오기
         dev_spec = self.settings.get('spec_deviation', {})

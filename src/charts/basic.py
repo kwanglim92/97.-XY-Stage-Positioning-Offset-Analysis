@@ -5,6 +5,8 @@ from matplotlib.figure import Figure
 import io
 import platform
 
+from core import drop_non_finite
+
 # ── 한국어 폰트 설정 ──
 if platform.system() == 'Windows':
     plt.rcParams['font.family'] = 'Malgun Gothic'
@@ -203,8 +205,10 @@ def plot_histogram(data: list, metric_key: str = 'value',
     """측정값 히스토그램 + 정규분포 곡선"""
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    values = [r.get(metric_key, 0) for r in data
-              if isinstance(r.get(metric_key), (int, float))]
+    # 비유한 값(NaN/inf)이 하나라도 섞이면 ax.hist의 범위 자동 감지가 실패한다.
+    values = drop_non_finite(
+        [r.get(metric_key, 0) for r in data
+         if isinstance(r.get(metric_key), (int, float))], title)
 
     if not values:
         return fig

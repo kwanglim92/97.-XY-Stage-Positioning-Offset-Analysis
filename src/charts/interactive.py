@@ -18,7 +18,7 @@ ORANGE  = '#fab387'
 PURPLE  = '#cba6f7'
 
 pg.setConfigOptions(background=BG, foreground=FG, antialias=True)
-from core import compute_trend, filter_valid_only
+from core import compute_trend, filter_valid_only, drop_non_finite
 from charts.interactive_widgets import CrossHairPlotWidget, HoverScatterWidget
 
 _DIE_COLORS = None  # Will be populated by _gen_die_colors
@@ -357,8 +357,10 @@ def create_histogram_widget(data: list, metric_key: str = 'value',
     plot = w.plotItem
     _style_axis(plot, title=title, x_label=metric_key, y_label='Density')
 
-    values = np.array([r.get(metric_key, 0) for r in data
-                       if isinstance(r.get(metric_key), (int, float))], dtype=float)
+    # 비유한 값(NaN/inf)이 하나라도 섞이면 np.histogram의 범위 계산이 통째로 실패한다.
+    raw = [r.get(metric_key, 0) for r in data
+           if isinstance(r.get(metric_key), (int, float))]
+    values = np.array(drop_non_finite(raw, title), dtype=float)
 
     if len(values) == 0:
         return w
