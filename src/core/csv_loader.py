@@ -474,6 +474,7 @@ def load_lot_data(lot_path: str) -> dict:
         'x_summary': {}, 'y_summary': {},
         'header': [],
         'tiff_files': [],
+        'warnings': [],
     }
 
     files = os.listdir(lot_path)
@@ -504,9 +505,13 @@ def load_lot_data(lot_path: str) -> dict:
             summary = parse_summary_csv(summary_path)
             result['x_summary'] = summary['x_summary']
             result['y_summary'] = summary['y_summary']
+            # 비정상 셀 경고는 위로 전달해 System Log에 노출한다.
+            # (logging은 stderr로만 나가 windowed EXE에서는 볼 수 없다)
+            result['warnings'] = [f'{lot_name}: {w}' for w in summary.get('warnings', [])]
         except Exception as e:
-            logging.warning("요약 CSV 파싱 실패 (%s: %s): %s",
-                            type(e).__name__, e, summary_path)
+            msg = f'{lot_name}: 요약 CSV 파싱 실패 ({type(e).__name__}: {e})'
+            logging.warning('%s [%s]', msg, summary_path)
+            result['warnings'] = [msg]
 
     # TIFF 파일 목록
     result['tiff_files'] = sorted(
@@ -524,7 +529,8 @@ def batch_load(root_path: str,
                lot_range: Optional[Union[tuple, list]] = None,
                axis: str = 'both',
                metric_col: str = 'HZ1_O (nm)',
-               errors: Optional[list] = None) -> list:
+               errors: Optional[list] = None,
+               warnings: Optional[list] = None) -> list:
     """유연한 범위 지정 배치 로드 — Analysis csv combine.exe 완전 대체
 
     Args:
@@ -534,6 +540,7 @@ def batch_load(root_path: str,
         metric_col: 측정값 컬럼 이름
         errors: 전달하면 Lot 단위 실패 메시지가 여기에 누적된다.
                 실패한 Lot은 건너뛰고 나머지 Lot은 정상 로드된다.
+        warnings: 전달하면 로드는 됐지만 값이 비정상인 셀 경고가 여기에 누적된다.
 
     Returns:
         [{'lot_name': 'Lot401', 'lot_index': 1, 'filename': 'Lot4_X_UL.csv',
@@ -566,6 +573,9 @@ def batch_load(root_path: str,
             if errors is not None:
                 errors.append(msg)
             continue
+
+        if warnings is not None:
+            warnings.extend(lot_data.get('warnings', []))
 
         # X 데이터
         if axis in ('both', 'x') and lot_data['x_data']:

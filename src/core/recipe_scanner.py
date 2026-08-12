@@ -14,8 +14,10 @@ recipe_scanner.py — Multi-Recipe 자동 탐지 및 비교
 
 import os
 import re
+import math
 import logging
 import traceback
+import collections
 from core.csv_loader import scan_lot_folders, batch_load, get_scan_summary
 from core import (compute_statistics, compute_trend,
                       detect_outliers, compute_repeatability,
@@ -96,6 +98,42 @@ def scan_recipes(root_path: str) -> list:
     return recipes
 
 
+def summarize_failed_measurements(data: list) -> dict:
+    """측정 실패 행(Valid=FALSE 또는 값이 비유한)을 집계한다.
+
+    장비는 정렬/패턴인식에 실패한 측정을 HZ1_O=NaN, Valid=FALSE로 기록한다.
+    이 행들은 통계·차트에서 제외되므로, 사용자가 '어느 데이터가 실제로 문제인지'
+    구별할 수 있도록 Lot·Die별로 요약해 돌려준다.
+
+    Returns:
+        {'count': N, 'by_lot': [(lot, n), ...], 'by_site': [(site_id, n), ...],
+         'text': '사람이 읽을 요약 한 줄'}  — 실패가 없으면 {'count': 0}
+    """
+    bad = [r for r in data
+           if not r.get('valid', True)
+           or not (isinstance(r.get('value'), (int, float))
+                   and math.isfinite(r['value']))]
+    if not bad:
+        return {'count': 0}
+
+    by_lot = collections.Counter(r.get('lot_name', '?') for r in bad)
+    by_site = collections.Counter(r.get('site_id', '?') for r in bad)
+
+    def _top(counter, n=5):
+        head = ', '.join(f'{k} {v}건' for k, v in counter.most_common(n))
+        if len(counter) > n:
+            head += f' 외 {len(counter) - n}개'
+        return head
+
+    return {
+        'count': len(bad),
+        'by_lot': by_lot.most_common(),
+        'by_site': by_site.most_common(),
+        'text': (f'측정 실패 {len(bad)}건 — 분석/차트에서 제외됨 '
+                 f'| Lot: {_top(by_lot)} | Die: {_top(by_site, 3)}'),
+    }
+
+
 def load_recipe_data(recipe: dict, round_name: str = '1st',
                      lot_range=None, axis='both') -> dict:
     """단일 Recipe의 데이터 로드 + 분석
@@ -122,12 +160,14 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
                 'raw_data': [], 'error': 'No data found', 'load_errors': []}
 
     load_errors = []
+    data_warnings = []
     data = batch_load(round_info['path'], lot_range=lot_range, axis=axis,
-                      errors=load_errors)
+                      errors=load_errors, warnings=data_warnings)
     if not data:
         return {'recipe': recipe['name'], 'round': round_info['name'],
                 'raw_data': [], 'error': 'No data loaded',
-                'load_errors': load_errors}
+                'load_errors': load_errors, 'data_warnings': data_warnings,
+                'failed_measurements': {'count': 0}}
 
     data = detect_outliers(data, method='iqr')
 
@@ -138,6 +178,8 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
         'round_path': round_info['path'],
         'raw_data': data,
         'load_errors': load_errors,
+        'data_warnings': data_warnings,
+        'failed_measurements': summarize_failed_measurements(data),
         'statistics': compute_statistics(data),
         'trend': compute_trend(data),
         'trend_x': compute_trend([r for r in data if r.get('method') == 'X']),
@@ -178,6 +220,8 @@ def load_all_recipes(root_path: str, round_name: str = '1st',
                 'raw_data': [],
                 'error': f'{type(e).__name__}: {e}',
                 'load_errors': [],
+                'data_warnings': [],
+                'failed_measurements': {'count': 0},
             }
         results.append(result)
 

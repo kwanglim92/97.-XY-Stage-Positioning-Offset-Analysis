@@ -116,20 +116,58 @@ class ScanMixin:
         QMessageBox.critical(self, "오류", str(e))
 
 
+    # System Log에 한 Recipe당 표시할 개별 경고 줄 수 상한 (나머지는 '외 N건'으로 요약)
+    _MAX_WARN_LINES = 5
+
+    def _log_data_quality(self, results):
+        """데이터 품질 문제를 System Log에 드러낸다.
+
+        기존에는 이 경고들이 Python logging(stderr)으로만 나가서, 콘솔이 없는
+        windowed EXE에서는 현장에서 전혀 볼 수 없었다. 일부 Lot/측정이 빠진 채
+        정상처럼 보이는 상황을 막기 위해 반드시 화면에 남긴다.
+        """
+        clean = True
+        for r in results:
+            label = r.get('short_name') or r.get('recipe', '')
+
+            if r.get('error'):
+                self.logger.error(f"  ❌ {label}: {r['error']}")
+                clean = False
+
+            for msg in r.get('load_errors', []):
+                self.logger.error(f"  ❌ {label}: {msg}")
+                clean = False
+
+            # 측정 실패 행 요약 — '어느 Lot/Die가 실제로 문제인지' 구별용
+            failed = r.get('failed_measurements') or {}
+            if failed.get('count'):
+                self.logger.warn(f"  ⚠ {label}: {failed['text']}")
+                clean = False
+
+            # 요약 CSV의 비정상 셀 (예: 장비가 NaN을 U+FFFD로 기록)
+            warns = r.get('data_warnings', [])
+            for msg in warns[:self._MAX_WARN_LINES]:
+                self.logger.warn(f"  ⚠ {label}: {msg}")
+            if len(warns) > self._MAX_WARN_LINES:
+                self.logger.warn(
+                    f"  ⚠ {label}: … 외 {len(warns) - self._MAX_WARN_LINES}건 "
+                    f"(요약 CSV 비정상 값, 총 {len(warns)}건)")
+            if warns:
+                clean = False
+
+        if clean:
+            self.logger.ok("  ✅ 데이터 품질 이상 없음")
+        else:
+            self.logger.info(
+                "  ℹ 위 항목은 분석·차트에서 제외되었습니다. "
+                "장비 원본 데이터 확인이 필요합니다.")
+
     def _on_scan_complete(self, results, comparison, elapsed):
         self.recipe_results = results
         total = sum(len(r.get('raw_data', [])) for r in results)
         self.logger.ok(f"✅ 전체 로드 완료: {total}개 데이터 ({elapsed:.1f}초 소요)")
 
-        # 격리 처리된 실패는 조용히 넘기지 않고 반드시 로그에 드러낸다.
-        # (일부 Lot/Recipe가 빠진 채 정상처럼 보이는 상황을 막기 위함)
-        for r in results:
-            label = r.get('short_name') or r.get('recipe', '')
-            if r.get('error'):
-                self.logger.error(f"  ❌ {label}: {r['error']}")
-            for msg in r.get('load_errors', []):
-                self.logger.warn(f"  ⚠ {label}: {msg}")
-
+        self._log_data_quality(results)
         self._update_summary_table(comparison, results)
 
         # 모든 Step Pass/Fail 일괄 계산 → 버튼 색상 즉시 반영

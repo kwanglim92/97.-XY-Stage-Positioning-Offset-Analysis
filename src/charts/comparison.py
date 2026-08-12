@@ -18,7 +18,8 @@ RECIPE_COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#E91E63',
                  '#9C27B0', '#00BCD4', '#795548', '#607D8B']
 
 from charts.basic import plot_boxplot, plot_trend_chart, _fig_to_png, _extract_site_data
-from core import compute_group_statistics, compute_trend
+from core import (compute_group_statistics, compute_trend,
+                  filter_by_method, filter_valid_only, drop_non_finite)
 
 def plot_recipe_comparison_boxplot(recipe_results: list) -> Figure:
     """Recipe별 박스플롯 비교 (X/Y 분리, 2행)"""
@@ -37,9 +38,13 @@ def plot_recipe_comparison_boxplot(recipe_results: list) -> Figure:
             data = result.get('raw_data', [])
             color = RECIPE_COLORS[i % len(RECIPE_COLORS)]
 
-            values = [r.get('value', 0) for r in data
-                      if isinstance(r.get('value'), (int, float))
-                      and r.get('method') == axis_name]
+            # 측정 실패 행(Valid=FALSE)은 값이 NaN으로 기록된다. 거르지 않으면
+            # np.mean/np.std가 nan이 되어 박스가 통째로 비어 보인다.
+            values = drop_non_finite(
+                [r.get('value', 0)
+                 for r in filter_valid_only(filter_by_method(data, axis_name))
+                 if isinstance(r.get('value'), (int, float))],
+                f'{result.get("short_name", "?")} {axis_name} Boxplot')
 
             if values:
                 bp = ax.boxplot([values], patch_artist=True,

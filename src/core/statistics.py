@@ -117,12 +117,30 @@ def detect_outliers(data: list, metric_key: str = 'value',
 
     Returns:
         원본 data에 'is_outlier': True/False 추가된 리스트
+
+    Note:
+        기준값은 **유효한 유한 측정값에서만** 계산한다. 측정 실패 행은
+        Valid=FALSE이면서 값이 NaN으로 기록되는데, NaN은 모든 비교가 False라
+        sorted()의 순서를 망가뜨려 사분위수를 엉뚱한 위치로 보낸다.
+        그 결과 이상치가 대량으로 잘못 잡히거나(거짓 양성), 경계가 NaN이 되어
+        하나도 잡히지 않는(거짓 음성) 일이 실제 현장 데이터에서 확인됐다.
+        판정 대상에서도 제외한다 — 측정 자체가 실패한 행은 이상치가 아니라 결측이다.
     """
-    values = [r.get(metric_key, 0) for r in data
-              if isinstance(r.get(metric_key), (int, float))]
+    values = drop_non_finite(
+        [r.get(metric_key, 0) for r in data
+         if isinstance(r.get(metric_key), (int, float)) and r.get('valid', True)],
+        'detect_outliers')
 
     if not values:
+        for r in data:
+            r['is_outlier'] = False
         return data
+
+    def _measurable(r):
+        """기준과 비교할 수 있는 행인가 (유효 + 유한)."""
+        val = r.get(metric_key, 0)
+        return (isinstance(val, (int, float)) and math.isfinite(val)
+                and r.get('valid', True))
 
     if method == 'iqr':
         sorted_vals = sorted(values)
@@ -135,7 +153,7 @@ def detect_outliers(data: list, metric_key: str = 'value',
 
         for r in data:
             val = r.get(metric_key, 0)
-            r['is_outlier'] = val < lower or val > upper
+            r['is_outlier'] = _measurable(r) and (val < lower or val > upper)
 
     elif method == 'zscore':
         mean = sum(values) / len(values)
@@ -144,6 +162,9 @@ def detect_outliers(data: list, metric_key: str = 'value',
 
         for r in data:
             val = r.get(metric_key, 0)
+            if not _measurable(r):
+                r['is_outlier'] = False
+                continue
             z = abs(val - mean) / std if std > 0 else 0
             r['is_outlier'] = z > threshold
 
@@ -153,7 +174,7 @@ def detect_outliers(data: list, metric_key: str = 'value',
             lo, hi = threshold
             for r in data:
                 val = r.get(metric_key, 0)
-                r['is_outlier'] = val < lo or val > hi
+                r['is_outlier'] = _measurable(r) and (val < lo or val > hi)
         else:
             for r in data:
                 r['is_outlier'] = False
