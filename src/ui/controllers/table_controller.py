@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from ui.color_helpers import _heatmap_diverging, _heatmap_single, _contrast_fg
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
+from core.statistics import (classify_row, ANOMALY_FAILED, ANOMALY_OUTLIER,
+                             ANOMALY_SPEC)
 
 
 # ── Summary 테이블 행 레이아웃 — ui_builder_mixin과 공유하는 단일 출처 ──
@@ -230,23 +232,67 @@ class TableMixin:
         self._fill_deviation_table(self.dev_y_table, self._dev_y)
 
 
+    def _current_recipe_short_name(self) -> str:
+        idx = getattr(self, 'current_recipe_idx', -1)
+        results = getattr(self, 'recipe_results', []) or []
+        if 0 <= idx < len(results):
+            r = results[idx]
+            return r.get('short_name') or r.get('recipe', '')
+        return ''
+
     def _update_raw_table(self):
+        """Raw Data 테이블 갱신 + 이상값 필터 적용.
+
+        필터는 **표시만** 걸러낸다. self.raw_data 자체는 손대지 않으므로
+        통계·차트·Spec 판정은 필터 상태와 무관하게 동일하다.
+        """
         t = self.raw_table
         t.setRowCount(0)
+
+        checks = getattr(self, 'raw_filter_checks', {})
+        wanted = {ANOMALY_FAILED: checks.get('failed'),
+                  ANOMALY_OUTLIER: checks.get('outlier'),
+                  ANOMALY_SPEC: checks.get('spec')}
+        wanted = {k for k, cb in wanted.items() if cb is not None and cb.isChecked()}
+
+        spec_limits = self.settings.get('spec_limits', {})
+        recipe = self._current_recipe_short_name()
+
+        shown = 0
         for r in self.raw_data:
+            kinds = classify_row(r, spec_limits, recipe)
+
+            # 아무것도 체크하지 않으면 전체 표시, 여러 개면 OR
+            if wanted and not (wanted & set(kinds)):
+                continue
+
             row = t.rowCount()
             t.insertRow(row)
+            shown += 1
+
+            failed = ANOMALY_FAILED in kinds
             io = r.get('is_outlier', False)
+            out_of_spec = ANOMALY_SPEC in kinds
+            value = r.get('value', 0)
             vals = [r.get('lot_name', ''), r.get('site_id', ''),
-                    r.get('method', ''), f"{r.get('value', 0):.3f}",
+                    r.get('method', ''),
+                    'nan' if failed and not isinstance(value, str) and value != value
+                    else f"{value:.3f}" if isinstance(value, (int, float)) else str(value),
                     '✅' if r.get('valid', True) else '❌',
-                    '⚠️' if io else '']
+                    '⚠️' if io else '',
+                    '❌' if out_of_spec else '']
             for col, v in enumerate(vals):
                 item = QTableWidgetItem(v)
                 item.setTextAlignment(Qt.AlignCenter)
-                if io:
+                if io or failed or out_of_spec:
                     item.setForeground(QColor(RED))
                 t.setItem(row, col, item)
+
+        label = getattr(self, 'raw_filter_label', None)
+        if label is not None:
+            total = len(self.raw_data)
+            label.setText(f"표시 {shown} / 전체 {total}" if wanted
+                          else f"전체 {total}행")
 
     # ──────────────────────────────────────────────
     # Charts — Hybrid: matplotlib + pyqtgraph

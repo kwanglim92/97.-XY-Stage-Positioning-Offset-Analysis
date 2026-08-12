@@ -319,18 +319,39 @@ class UIBuilderMixin:
         self.tiff_path_label = QLabel("Double-click row → Load TIFF")
         self.tiff_path_label.setStyleSheet(f"color: {FG2}; font-size: 8pt;")
         tiff_bar2.addWidget(self.tiff_path_label, 1)
+
+        # ─── 이상값 필터 — 표시만 걸러내며 통계·차트·판정에는 영향이 없다 ───
+        self.raw_filter_checks = {}
+        for key, label, tip in (
+            ('failed', '❌ 측정 실패',
+             '값이 NaN이거나 Valid=FALSE인 행\n(장비가 정렬·패턴인식에 실패한 측정)'),
+            ('outlier', '⚠️ 이상치',
+             'IQR 기준을 벗어난 측정값\n(측정은 성공했으나 값이 튀는 경우)'),
+            ('spec', '📏 Spec 초과',
+             'spec_limits의 LSL/USL를 벗어난 측정값'),
+        ):
+            cb = QCheckBox(label)
+            cb.setToolTip(tip + '\n\n※ 표시만 걸러냅니다. 통계·차트·판정은 그대로입니다.')
+            cb.stateChanged.connect(self._update_raw_table)
+            tiff_bar2.addWidget(cb)
+            self.raw_filter_checks[key] = cb
+
+        self.raw_filter_label = QLabel("")
+        self.raw_filter_label.setStyleSheet(f"color: {FG2}; font-size: 8pt;")
+        tiff_bar2.addWidget(self.raw_filter_label)
+
         raw_bar_w = QWidget()
         raw_bar_w.setLayout(tiff_bar2)
         raw_layout.addWidget(raw_bar_w)
 
         self.raw_table = CopyableTable()
-        cols_r = ['Lot', 'Site', 'Axis', 'HZ1_O', 'V', 'Out']
+        cols_r = ['Lot', 'Site', 'Axis', 'HZ1_O', 'V', 'Out', 'Spec']
         self.raw_table.setColumnCount(len(cols_r))
         self.raw_table.setHorizontalHeaderLabels(cols_r)
         raw_hdr = self.raw_table.horizontalHeader()
         for col in range(len(cols_r)):
             raw_hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(4, 30), (5, 30)]:
+        for col, width in [(4, 30), (5, 30), (6, 40)]:
             raw_hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.raw_table.setColumnWidth(col, width)
         self.raw_table.cellDoubleClicked.connect(self._on_row_double_click)
@@ -766,6 +787,7 @@ class UIBuilderMixin:
 
         export_buttons_data = [
             ('Excel Export', 'Die별 편차, Summary, Raw Data 등\n전체 데이터를 Excel 파일로 저장', self._export_excel, ACCENT),
+            ('Quality Report', '측정 실패·이상치·Spec 초과 행과 System Log를\n전체 Recipe 기준으로 Excel 저장 (추적정보 포함)', self._export_quality_report, ORANGE),
             ('CSV Export', 'Raw Data를 CSV 형식으로 저장\n타 프로그램에서 불러오기 용이', self._export_csv, GREEN),
             ('PDF Report', '차트 + 통계 포함 PDF 보고서 생성\n출력 및 공유용', self._export_pdf, RED),
         ]

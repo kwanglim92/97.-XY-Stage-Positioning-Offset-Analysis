@@ -192,6 +192,45 @@ def filter_valid_only(data: list) -> list:
     return [r for r in data if r.get('valid', True)]
 
 
+# 이상 유형 — 화면 필터·엑셀 리포트가 같은 기준을 쓰도록 한 곳에 정의한다.
+ANOMALY_FAILED = '측정 실패'
+ANOMALY_OUTLIER = '이상치'
+ANOMALY_SPEC = 'Spec 초과'
+
+
+def spec_bounds(spec_limits: dict, recipe_name: str, axis: str) -> tuple:
+    """settings의 spec_limits에서 (lsl, usl)을 꺼낸다. 없으면 (None, None).
+
+    PASS/FAIL 판정에 쓰는 spec_deviation(range/stddev)과는 별개로,
+    개별 측정값의 규격 이탈은 spec_limits의 LSL/USL로 본다 (Cpk와 동일 기준).
+    """
+    entry = (spec_limits or {}).get(recipe_name) or {}
+    ax = entry.get((axis or '').upper()) or {}
+    return ax.get('lsl'), ax.get('usl')
+
+
+def classify_row(row: dict, spec_limits: dict = None,
+                 recipe_name: str = '', metric_key: str = 'value') -> list:
+    """측정 행 하나의 이상 유형 목록을 돌려준다 (해당 없으면 빈 리스트).
+
+    측정에 실패한 행은 값 자체가 없으므로 이상치·Spec 판정을 하지 않는다.
+    """
+    val = row.get(metric_key, 0)
+    finite = isinstance(val, (int, float)) and math.isfinite(val)
+
+    if not finite or not row.get('valid', True):
+        return [ANOMALY_FAILED]
+
+    kinds = []
+    if row.get('is_outlier'):
+        kinds.append(ANOMALY_OUTLIER)
+
+    lsl, usl = spec_bounds(spec_limits, recipe_name, row.get('method', ''))
+    if (lsl is not None and val < lsl) or (usl is not None and val > usl):
+        kinds.append(ANOMALY_SPEC)
+    return kinds
+
+
 def drop_non_finite(values, context: str = '') -> list:
     """NaN / ±inf 등 비유한 값을 제거한다 (제거가 있었으면 경고).
 

@@ -4,7 +4,11 @@ exporter.py — CSV / Excel 내보내기
 
 import os
 import csv
+import collections
 from typing import Optional
+
+from core.statistics import (classify_row, spec_bounds,
+                             ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
 
 
 def export_combined_csv(data: list, output_path: str,
@@ -78,15 +82,130 @@ def export_statistics_csv(stats: list, output_path: str) -> str:
     return output_path
 
 
+# ──────────────────────────────────────────────
+# 데이터 품질 리포트 — 어느 데이터가 어떻게 이상한지
+# ──────────────────────────────────────────────
+
+ANOMALY_HEADERS = ['Recipe', 'Round', 'Lot', 'Site ID', 'Die X', 'Die Y',
+                   'Axis', 'Point No', 'State', 'Valid', 'HZ1_O (nm)',
+                   '이상 유형', 'LSL', 'USL', '원본 CSV', 'Lot 폴더']
+
+
+def collect_anomalies(recipe_results: list, spec_limits: dict = None) -> list:
+    """전체 Recipe에서 이상 측정 행을 추적정보와 함께 모은다.
+
+    Returns:
+        [{'recipe','round','lot','site_id','die_x','die_y','axis','point_no',
+          'state','valid','value','kinds','lsl','usl','csv_path','lot_dir'}, ...]
+    """
+    rows = []
+    for result in recipe_results or []:
+        recipe = result.get('short_name') or result.get('recipe', '')
+        round_name = result.get('round', '')
+        round_path = result.get('round_path', '')
+
+        for r in result.get('raw_data', []):
+            kinds = classify_row(r, spec_limits, recipe)
+            if not kinds:
+                continue
+
+            lot = r.get('lot_name', '')
+            lot_dir = os.path.join(round_path, lot) if round_path and lot else ''
+            filename = r.get('filename', '')
+            lsl, usl = spec_bounds(spec_limits, recipe, r.get('method', ''))
+
+            rows.append({
+                'recipe': recipe,
+                'round': round_name,
+                'lot': lot,
+                'site_id': r.get('site_id', ''),
+                'die_x': r.get('site_x', ''),
+                'die_y': r.get('site_y', ''),
+                'axis': r.get('method', ''),
+                'point_no': r.get('point_no', ''),
+                'state': r.get('state', ''),
+                'valid': 'TRUE' if r.get('valid', True) else 'FALSE',
+                'value': r.get('value', ''),
+                'kinds': ', '.join(kinds),
+                'lsl': lsl if lsl is not None else '',
+                'usl': usl if usl is not None else '',
+                'csv_path': os.path.join(lot_dir, filename) if lot_dir and filename else filename,
+                'lot_dir': lot_dir,
+            })
+    return rows
+
+
+def build_quality_summary(recipe_results: list, anomalies: list) -> list:
+    """Recipe별 요약 — 총 측정 대비 이상 건수."""
+    by_recipe = collections.defaultdict(lambda: collections.Counter())
+    for a in anomalies:
+        for kind in a['kinds'].split(', '):
+            by_recipe[a['recipe']][kind] += 1
+
+    summary = []
+    for result in recipe_results or []:
+        recipe = result.get('short_name') or result.get('recipe', '')
+        c = by_recipe.get(recipe, collections.Counter())
+        total = len(result.get('raw_data', []))
+        failed = c.get(ANOMALY_FAILED, 0)
+        summary.append({
+            'recipe': recipe,
+            'round': result.get('round', ''),
+            'total': total,
+            'failed': failed,
+            'outlier': c.get(ANOMALY_OUTLIER, 0),
+            'spec': c.get(ANOMALY_SPEC, 0),
+            'file_issues': len(result.get('data_warnings', [])),
+            'failed_pct': round(failed / total * 100, 2) if total else 0,
+            'load_error': result.get('error', ''),
+        })
+    return summary
+
+
+def build_file_issues(recipe_results: list) -> list:
+    """요약 CSV의 비정상 셀 경고 (예: 장비가 NaN을 U+FFFD로 기록)."""
+    issues = []
+    for result in recipe_results or []:
+        recipe = result.get('short_name') or result.get('recipe', '')
+        for msg in result.get('data_warnings', []):
+            issues.append({'recipe': recipe, 'message': msg})
+        for msg in result.get('load_errors', []):
+            issues.append({'recipe': recipe, 'message': f'[로드 실패] {msg}'})
+    return issues
+
+
+def _group_counts(anomalies: list, key: str) -> list:
+    """key(lot/site_id)별 유형 집계."""
+    table = collections.defaultdict(lambda: collections.Counter())
+    for a in anomalies:
+        ident = (a['recipe'], a[key])
+        for kind in a['kinds'].split(', '):
+            table[ident][kind] += 1
+            table[ident]['합계'] += 1
+
+    rows = [{'recipe': rec, 'key': val,
+             'failed': c.get(ANOMALY_FAILED, 0),
+             'outlier': c.get(ANOMALY_OUTLIER, 0),
+             'spec': c.get(ANOMALY_SPEC, 0),
+             'total': c.get('합계', 0)}
+            for (rec, val), c in table.items()]
+    rows.sort(key=lambda r: (-r['total'], r['recipe'], str(r['key'])))
+    return rows
+
+
 def export_excel_report(data: list, stats: dict, trend: list,
-                        output_path: str) -> str:
+                        output_path: str,
+                        recipe_results: list = None,
+                        spec_limits: dict = None,
+                        log_rows: list = None) -> str:
     """Excel 리포트 (openpyxl 사용)
 
     시트 구성:
-        1. Raw Data — 전체 측정 데이터
+        1. Raw Data — 선택된 Step의 측정 데이터
         2. Statistics — 그룹별 통계
         3. Trend — Lot별 트렌드
-        4. Repeatability — 반복성 분석
+        recipe_results/log_rows를 넘기면 아래 시트가 추가된다 (전체 Recipe 기준):
+        4. Summary / Anomalies / By Lot / By Die / File Issues / System Log
     """
     try:
         from openpyxl import Workbook
@@ -191,5 +310,129 @@ def export_excel_report(data: list, stats: dict, trend: list,
             for col, val in enumerate(values, 1):
                 ws3.cell(row=row_idx, column=col, value=val).font = data_font
 
+    # === Sheet 4~: 데이터 품질 / 로그 (전달된 경우에만) ===
+    write_quality_sheets(wb, recipe_results, spec_limits, log_rows)
+
+    wb.save(output_path)
+    return output_path
+
+
+# ──────────────────────────────────────────────
+# 품질 리포트 시트 작성
+# ──────────────────────────────────────────────
+
+def _make_styles():
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    return {
+        'header_font': Font(name='맑은 고딕', bold=True, size=10, color='FFFFFF'),
+        'header_fill': PatternFill(start_color='1565C0', end_color='1565C0',
+                                   fill_type='solid'),
+        'data_font': Font(name='맑은 고딕', size=9),
+        'bad_font': Font(name='맑은 고딕', size=9, color='C62828'),
+        'align': Alignment(horizontal='center'),
+        'border': Border(*[Side(style='thin', color='D0D0D0')] * 4),
+    }
+
+
+def _write_table(ws, headers: list, rows: list, st: dict,
+                 width: int = 16, highlight=None):
+    """헤더 + 행을 채우고 틀 고정·자동필터를 건다.
+
+    highlight: row(dict/list)를 받아 True면 빨간 글씨로 표시하는 콜백.
+    """
+    from openpyxl.utils import get_column_letter
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = st['header_font']
+        cell.fill = st['header_fill']
+        cell.alignment = st['align']
+        cell.border = st['border']
+
+    for row_idx, values in enumerate(rows, 2):
+        bad = bool(highlight and highlight(values))
+        for col, val in enumerate(values, 1):
+            cell = ws.cell(row=row_idx, column=col, value=val)
+            cell.font = st['bad_font'] if bad else st['data_font']
+            cell.border = st['border']
+
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.freeze_panes = 'A2'
+    if rows:
+        ws.auto_filter.ref = (f'A1:{get_column_letter(len(headers))}'
+                              f'{len(rows) + 1}')
+
+
+def write_quality_sheets(wb, recipe_results: list = None,
+                         spec_limits: dict = None,
+                         log_rows: list = None) -> None:
+    """워크북에 데이터 품질·로그 시트를 덧붙인다 (인자가 없으면 아무것도 하지 않음)."""
+    st = _make_styles()
+
+    if recipe_results:
+        anomalies = collect_anomalies(recipe_results, spec_limits)
+
+        # Summary
+        ws = wb.create_sheet('Summary')
+        _write_table(
+            ws,
+            ['Recipe', 'Round', '총 측정', '측정 실패', '측정 실패 %',
+             '이상치', 'Spec 초과', '파일 이상', '로드 오류'],
+            [[s['recipe'], s['round'], s['total'], s['failed'], s['failed_pct'],
+              s['outlier'], s['spec'], s['file_issues'], s['load_error']]
+             for s in build_quality_summary(recipe_results, anomalies)],
+            st, highlight=lambda v: bool(v[3]) or bool(v[8]))
+
+        # Anomalies — 상세 목록 + 추적정보
+        ws = wb.create_sheet('Anomalies')
+        _write_table(
+            ws, ANOMALY_HEADERS,
+            [[a['recipe'], a['round'], a['lot'], a['site_id'], a['die_x'],
+              a['die_y'], a['axis'], a['point_no'], a['state'], a['valid'],
+              a['value'], a['kinds'], a['lsl'], a['usl'],
+              a['csv_path'], a['lot_dir']]
+             for a in anomalies],
+            st, width=18, highlight=lambda v: ANOMALY_FAILED in str(v[11]))
+
+        # 집계
+        for title, key in (('By Lot', 'lot'), ('By Die', 'site_id')):
+            ws = wb.create_sheet(title)
+            _write_table(
+                ws,
+                ['Recipe', 'Lot' if key == 'lot' else 'Site ID',
+                 '측정 실패', '이상치', 'Spec 초과', '합계'],
+                [[g['recipe'], g['key'], g['failed'], g['outlier'],
+                  g['spec'], g['total']]
+                 for g in _group_counts(anomalies, key)],
+                st, width=18)
+
+        # 파일 이상 (요약 CSV 비정상 셀)
+        ws = wb.create_sheet('File Issues')
+        _write_table(ws, ['Recipe', '내용'],
+                     [[i['recipe'], i['message']]
+                      for i in build_file_issues(recipe_results)],
+                     st, width=60)
+
+    if log_rows:
+        ws = wb.create_sheet('System Log')
+        _write_table(ws, ['시각', '구분', '메시지'],
+                     [[r['time'], r['level'], r['message']] for r in log_rows],
+                     st, width=70,
+                     highlight=lambda v: v[1] in ('오류', '경고'))
+        ws.column_dimensions['A'].width = 10
+        ws.column_dimensions['B'].width = 8
+
+
+def export_quality_report(recipe_results: list, spec_limits: dict,
+                          log_rows: list, output_path: str) -> str:
+    """오류·로그 전용 워크북 (전체 Recipe 기준)."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.remove(wb.active)          # 기본 빈 시트 제거
+    write_quality_sheets(wb, recipe_results, spec_limits, log_rows)
+    if not wb.sheetnames:
+        wb.create_sheet('Summary')
     wb.save(output_path)
     return output_path
