@@ -10,7 +10,8 @@ import os
 import pytest
 
 from core.statistics import (classify_row, spec_bounds, axis_reference_means,
-                             ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
+                             active_anomaly_kinds, ANOMALY_FAILED,
+                             ANOMALY_OUTLIER, ANOMALY_SPEC)
 from core.exporter import (collect_anomalies, build_quality_summary,
                            build_file_issues, export_quality_report)
 
@@ -26,6 +27,16 @@ def _row(value, valid=True, outlier=False, method="X",
             "is_outlier": outlier, "method": method, "lot_name": lot,
             "site_id": site, "site_x": 0, "site_y": 4, "point_no": 1,
             "state": "COMPLETED", "filename": "Lot5_X_UL.csv"}
+
+
+@pytest.fixture
+def spec_on(monkeypatch):
+    """Spec 초과 판정 노출 스위치를 켠다.
+
+    Recipe별 LSL/USL의 판별 조건이 확정되지 않아 기본값은 꺼짐(SPEC_ANOMALY_ENABLED=False)
+    이지만, 계산 로직 자체는 살아 있어야 하므로 테스트로 계속 고정한다.
+    """
+    monkeypatch.setattr("core.statistics.SPEC_ANOMALY_ENABLED", True)
 
 
 def _result(rows, name="Vision Pattern", warnings=None):
@@ -57,14 +68,14 @@ class TestClassifyRow:
         assert classify_row(_row(1000.0, outlier=True), SPEC,
                             "Vision Pattern") == [ANOMALY_OUTLIER]
 
-    def test_spec_violation_both_directions(self):
+    def test_spec_violation_both_directions(self, spec_on):
         assert classify_row(_row(5000.1), SPEC, "Vision Pattern") == [ANOMALY_SPEC]
         assert classify_row(_row(-5000.1), SPEC, "Vision Pattern") == [ANOMALY_SPEC]
 
-    def test_spec_boundary_is_inclusive(self):
+    def test_spec_boundary_is_inclusive(self, spec_on):
         assert classify_row(_row(5000.0), SPEC, "Vision Pattern") == []
 
-    def test_spec_uses_deviation_when_axis_means_given(self):
+    def test_spec_uses_deviation_when_axis_means_given(self, spec_on):
         """레시피 기준점 차이(bias)는 Stage 성능이 아니므로 판정에서 빠져야 한다.
 
         현장 Global Align X는 bias -3969 nm가 ±5000의 79%를 먹어, 산포가 정상인데도
@@ -88,14 +99,27 @@ class TestClassifyRow:
         assert means["X"] == pytest.approx(200.0)   # NaN/무효 행은 제외
         assert means["Y"] == pytest.approx(1000.0)
 
-    def test_outlier_and_spec_together(self):
+    def test_outlier_and_spec_together(self, spec_on):
         kinds = classify_row(_row(99999.0, outlier=True), SPEC, "Vision Pattern")
         assert kinds == [ANOMALY_OUTLIER, ANOMALY_SPEC]
 
-    def test_missing_spec_config_skips_spec_check(self):
+    def test_missing_spec_config_skips_spec_check(self, spec_on):
         """Spec 설정이 없는 Recipe는 Spec 초과로 잡지 않는다."""
         assert classify_row(_row(99999.0), SPEC, "Unknown Recipe") == []
         assert spec_bounds(SPEC, "Unknown Recipe", "X") == (None, None)
+
+    def test_spec_is_hidden_by_default(self):
+        """기본값은 꺼짐 — Recipe별 판별 조건이 정해지기 전까지 판정에 쓰지 않는다."""
+        assert classify_row(_row(99999.0), SPEC, "Vision Pattern") == []
+        assert ANOMALY_SPEC not in active_anomaly_kinds()
+        # 이상치 판정은 스위치와 무관하게 계속 동작해야 한다
+        assert classify_row(_row(99999.0, outlier=True), SPEC,
+                            "Vision Pattern") == [ANOMALY_OUTLIER]
+
+    def test_spec_logic_survives_behind_the_switch(self, spec_on):
+        """스위치만 켜면 계산 로직이 그대로 되살아나야 한다 (삭제가 아니라 숨김)."""
+        assert classify_row(_row(99999.0), SPEC, "Vision Pattern") == [ANOMALY_SPEC]
+        assert ANOMALY_SPEC in active_anomaly_kinds()
 
     def test_spec_bounds_is_axis_case_insensitive(self):
         assert spec_bounds(SPEC, "Vision Pattern", "x") == (-5000.0, 5000.0)
@@ -103,7 +127,7 @@ class TestClassifyRow:
 
 # ──────────────────────────────────────────────────────────────────────────
 class TestCollectAnomalies:
-    def test_only_anomalous_rows_with_traceability(self):
+    def test_only_anomalous_rows_with_traceability(self, spec_on):
         # 정상 20건(평균 ≈ 0) + 측정 실패 1 + 편차 기준으로도 이탈하는 1건
         rows = [_row(float(v)) for v in range(-10, 10)]
         rows += [_row(NAN, valid=False), _row(9000.0)]
@@ -119,7 +143,7 @@ class TestCollectAnomalies:
         assert first["csv_path"].endswith("Lot5_X_UL.csv")
         assert "Lot501" in first["lot_dir"]
 
-    def test_summary_counts_match_detail(self):
+    def test_summary_counts_match_detail(self, spec_on):
         rows = [_row(float(v)) for v in range(-10, 10)]          # 정상 20
         rows += [_row(NAN, valid=False)] * 2                      # 실패 2
         rows += [_row(9000.0, outlier=True)]                      # 이상치 + Spec
@@ -144,7 +168,7 @@ class TestCollectAnomalies:
 
 # ──────────────────────────────────────────────────────────────────────────
 class TestExcelOutput:
-    def test_workbook_has_expected_sheets_and_rows(self, tmp_path):
+    def test_workbook_has_expected_sheets_and_rows(self, tmp_path, spec_on):
         pytest.importorskip("openpyxl")
         from openpyxl import load_workbook
 

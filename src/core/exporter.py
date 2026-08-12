@@ -8,7 +8,8 @@ import collections
 from typing import Optional
 
 from core.statistics import (classify_row, spec_bounds, axis_reference_means,
-                             ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
+                             active_anomaly_kinds, ANOMALY_FAILED,
+                             ANOMALY_OUTLIER, ANOMALY_SPEC)
 
 
 def export_combined_csv(data: list, output_path: str,
@@ -384,16 +385,22 @@ def write_quality_sheets(wb, recipe_results: list = None,
     if recipe_results:
         anomalies = collect_anomalies(recipe_results, spec_limits)
 
+        # Spec 초과 판정이 꺼져 있으면 관련 열도 내보내지 않는다 (화면과 동일 기준)
+        show_spec = ANOMALY_SPEC in active_anomaly_kinds()
+
         # Summary
         ws = wb.create_sheet('Summary')
+        headers = ['Recipe', 'Round', '총 측정', '측정 실패', '측정 실패 %', '이상치']
+        if show_spec:
+            headers.append('Spec 초과')
+        headers += ['파일 이상', '로드 오류']
         _write_table(
-            ws,
-            ['Recipe', 'Round', '총 측정', '측정 실패', '측정 실패 %',
-             '이상치', 'Spec 초과', '파일 이상', '로드 오류'],
+            ws, headers,
             [[s['recipe'], s['round'], s['total'], s['failed'], s['failed_pct'],
-              s['outlier'], s['spec'], s['file_issues'], s['load_error']]
+              s['outlier']] + ([s['spec']] if show_spec else [])
+             + [s['file_issues'], s['load_error']]
              for s in build_quality_summary(recipe_results, anomalies)],
-            st, highlight=lambda v: bool(v[3]) or bool(v[8]))
+            st, highlight=lambda v: bool(v[3]) or bool(v[-1]))
 
         # Anomalies — 상세 목록 + 추적정보
         ws = wb.create_sheet('Anomalies')
@@ -412,9 +419,9 @@ def write_quality_sheets(wb, recipe_results: list = None,
             _write_table(
                 ws,
                 ['Recipe', 'Lot' if key == 'lot' else 'Site ID',
-                 '측정 실패', '이상치', 'Spec 초과', '합계'],
-                [[g['recipe'], g['key'], g['failed'], g['outlier'],
-                  g['spec'], g['total']]
+                 '측정 실패', '이상치'] + (['Spec 초과'] if show_spec else []) + ['합계'],
+                [[g['recipe'], g['key'], g['failed'], g['outlier']]
+                 + ([g['spec']] if show_spec else []) + [g['total']]
                  for g in _group_counts(anomalies, key)],
                 st, width=18)
 

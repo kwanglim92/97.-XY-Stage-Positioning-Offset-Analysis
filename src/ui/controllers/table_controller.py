@@ -5,7 +5,8 @@ from PySide6.QtGui import QBrush, QColor
 from ui.color_helpers import _heatmap_diverging, _heatmap_single, _contrast_fg
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 from core.statistics import (classify_row, axis_reference_means,
-                             ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
+                             spec_anomaly_enabled, ANOMALY_FAILED,
+                             ANOMALY_OUTLIER, ANOMALY_SPEC)
 
 
 # ── Summary 테이블 행 레이아웃 — ui_builder_mixin과 공유하는 단일 출처 ──
@@ -281,8 +282,9 @@ class TableMixin:
                     'nan' if failed and not isinstance(value, str) and value != value
                     else f"{value:.3f}" if isinstance(value, (int, float)) else str(value),
                     '✅' if r.get('valid', True) else '❌',
-                    '⚠️' if io else '',
-                    '❌' if out_of_spec else '']
+                    '⚠️' if io else '']
+            if spec_anomaly_enabled():
+                vals.append('❌' if out_of_spec else '')
             for col, v in enumerate(vals):
                 item = QTableWidgetItem(v)
                 item.setTextAlignment(Qt.AlignCenter)

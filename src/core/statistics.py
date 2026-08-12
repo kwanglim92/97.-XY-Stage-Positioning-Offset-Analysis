@@ -197,6 +197,29 @@ ANOMALY_FAILED = '측정 실패'
 ANOMALY_OUTLIER = '이상치'
 ANOMALY_SPEC = 'Spec 초과'
 
+# ── Spec 초과 판정 노출 스위치 ────────────────────────────────────────────
+# Offset Limits(LSL/USL)는 Recipe 4개가 모두 ±5000 nm로 동일한데, 정밀도 스펙은
+# 1.0/2.0/4.0/6.0 µm로 6배 차이가 난다. 이 값의 Recipe별 물리적 의미와 판별 조건이
+# 확정되지 않아 현장에 혼선만 줄 수 있어, 판정 노출을 잠시 끈다.
+#
+# 계산 로직(spec_bounds/classify_row)은 그대로 두고 이 값만 True로 되돌리면
+# Raw Data의 체크박스·Spec 열과 엑셀 리포트의 Spec 항목이 함께 복원된다.
+# Cpk는 이 스위치와 무관하게 계속 Offset Limits를 사용한다.
+SPEC_ANOMALY_ENABLED = False
+
+
+def spec_anomaly_enabled() -> bool:
+    """Spec 초과 판정을 화면·리포트에 노출할지 여부 (호출 시점에 평가)."""
+    return SPEC_ANOMALY_ENABLED
+
+
+def active_anomaly_kinds() -> list:
+    """현재 노출 중인 이상 유형 목록 — 화면과 리포트의 열 구성을 여기서 맞춘다."""
+    kinds = [ANOMALY_FAILED, ANOMALY_OUTLIER]
+    if spec_anomaly_enabled():
+        kinds.append(ANOMALY_SPEC)
+    return kinds
+
 
 def spec_bounds(spec_limits: dict, recipe_name: str, axis: str) -> tuple:
     """settings의 spec_limits에서 (lsl, usl)을 꺼낸다. 없으면 (None, None).
@@ -248,12 +271,13 @@ def classify_row(row: dict, spec_limits: dict = None,
     if row.get('is_outlier'):
         kinds.append(ANOMALY_OUTLIER)
 
-    axis = (row.get('method') or '').upper()
-    target = val - (axis_means or {}).get(axis, 0.0)
+    if spec_anomaly_enabled():
+        axis = (row.get('method') or '').upper()
+        target = val - (axis_means or {}).get(axis, 0.0)
 
-    lsl, usl = spec_bounds(spec_limits, recipe_name, axis)
-    if (lsl is not None and target < lsl) or (usl is not None and target > usl):
-        kinds.append(ANOMALY_SPEC)
+        lsl, usl = spec_bounds(spec_limits, recipe_name, axis)
+        if (lsl is not None and target < lsl) or (usl is not None and target > usl):
+            kinds.append(ANOMALY_SPEC)
     return kinds
 
 

@@ -5,6 +5,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 
 import math
 from functools import partial
+from core.statistics import spec_anomaly_enabled
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
 from ui.widgets.stat_card import StatCard
 from ui.widgets.system_logger import SystemLogger
@@ -330,6 +331,10 @@ class UIBuilderMixin:
             ('spec', '📏 Spec 초과',
              'spec_limits의 LSL/USL를 벗어난 측정값'),
         ):
+            # Spec 초과는 Recipe별 판별 조건 확정 전까지 노출하지 않는다
+            # (core.statistics.SPEC_ANOMALY_ENABLED)
+            if key == 'spec' and not spec_anomaly_enabled():
+                continue
             cb = QCheckBox(label)
             cb.setToolTip(tip + '\n\n※ 표시만 걸러냅니다. 통계·차트·판정은 그대로입니다.')
             cb.stateChanged.connect(self._update_raw_table)
@@ -345,13 +350,17 @@ class UIBuilderMixin:
         raw_layout.addWidget(raw_bar_w)
 
         self.raw_table = CopyableTable()
-        cols_r = ['Lot', 'Site', 'Axis', 'HZ1_O', 'V', 'Out', 'Spec']
+        cols_r = ['Lot', 'Site', 'Axis', 'HZ1_O', 'V', 'Out']
+        fixed_widths = [(4, 30), (5, 30)]
+        if spec_anomaly_enabled():
+            cols_r.append('Spec')
+            fixed_widths.append((6, 40))
         self.raw_table.setColumnCount(len(cols_r))
         self.raw_table.setHorizontalHeaderLabels(cols_r)
         raw_hdr = self.raw_table.horizontalHeader()
         for col in range(len(cols_r)):
             raw_hdr.setSectionResizeMode(col, QHeaderView.Stretch)
-        for col, width in [(4, 30), (5, 30), (6, 40)]:
+        for col, width in fixed_widths:
             raw_hdr.setSectionResizeMode(col, QHeaderView.Fixed)
             self.raw_table.setColumnWidth(col, width)
         self.raw_table.cellDoubleClicked.connect(self._on_row_double_click)
