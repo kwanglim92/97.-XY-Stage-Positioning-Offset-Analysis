@@ -19,9 +19,15 @@ class CardMixin:
         if not sp:
             self.logger.warn(f"spec_limits에 '{short}' 키 없음 → Cpk 계산 불가")
             sp = {'X': {}, 'Y': {}}
-        cpk_x = compute_cpk(s_x['mean'], s_x['stdev'],
+        # Cpk도 편차 기준(0점 = 축 기준평균)으로 계산한다.
+        #   raw 평균에는 레시피별 기준점 차이(bias)가 섞여 있어, 예컨대 Global Align X는
+        #   bias -3969 nm가 ±5000 한계의 79%를 먹어 Cpk가 0.36으로 나왔다.
+        #   같은 카드의 Dev Range/StdDev는 bias 불변 지표라 해석이 서로 어긋났다.
+        #   편차 기준에서는 평균이 0이므로 Cpk = min(|LSL|, USL) / 3σ (= Cp)가 되며,
+        #   '허용 offset 창 대비 산포 여유'라는 정밀도 지표로 일관된다.
+        cpk_x = compute_cpk(0.0, s_x['stdev'],
                             sp.get('X', {}).get('lsl', -5000), sp.get('X', {}).get('usl', 5000))
-        cpk_y = compute_cpk(s_y['mean'], s_y['stdev'],
+        cpk_y = compute_cpk(0.0, s_y['stdev'],
                             sp.get('Y', {}).get('lsl', -5000), sp.get('Y', {}).get('usl', 5000))
 
         dev_spec = self.settings.get('spec_deviation', {})

@@ -4,8 +4,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from ui.color_helpers import _heatmap_diverging, _heatmap_single, _contrast_fg
 from ui.theme import BG, BG2, BG3, FG, FG2, ACCENT, GREEN, RED, ORANGE, PURPLE
-from core.statistics import (classify_row, ANOMALY_FAILED, ANOMALY_OUTLIER,
-                             ANOMALY_SPEC)
+from core.statistics import (classify_row, axis_reference_means,
+                             ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
 
 
 # ── Summary 테이블 행 레이아웃 — ui_builder_mixin과 공유하는 단일 출처 ──
@@ -257,10 +257,12 @@ class TableMixin:
 
         spec_limits = self.settings.get('spec_limits', {})
         recipe = self._current_recipe_short_name()
+        # Spec 판정은 PASS/FAIL(Dev Range/StdDev)과 같은 편차 기준을 쓴다
+        axis_means = axis_reference_means(self.raw_data)
 
         shown = 0
         for r in self.raw_data:
-            kinds = classify_row(r, spec_limits, recipe)
+            kinds = classify_row(r, spec_limits, recipe, axis_means=axis_means)
 
             # 아무것도 체크하지 않으면 전체 표시, 여러 개면 OR
             if wanted and not (wanted & set(kinds)):

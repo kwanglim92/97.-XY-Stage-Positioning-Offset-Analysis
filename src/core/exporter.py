@@ -7,7 +7,7 @@ import csv
 import collections
 from typing import Optional
 
-from core.statistics import (classify_row, spec_bounds,
+from core.statistics import (classify_row, spec_bounds, axis_reference_means,
                              ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
 
 
@@ -88,7 +88,8 @@ def export_statistics_csv(stats: list, output_path: str) -> str:
 
 ANOMALY_HEADERS = ['Recipe', 'Round', 'Lot', 'Site ID', 'Die X', 'Die Y',
                    'Axis', 'Point No', 'State', 'Valid', 'HZ1_O (nm)',
-                   '이상 유형', 'LSL', 'USL', '원본 CSV', 'Lot 폴더']
+                   '편차 (nm)', '기준평균 (nm)', '이상 유형', 'LSL', 'USL',
+                   '원본 CSV', 'Lot 폴더']
 
 
 def collect_anomalies(recipe_results: list, spec_limits: dict = None) -> list:
@@ -103,18 +104,28 @@ def collect_anomalies(recipe_results: list, spec_limits: dict = None) -> list:
         recipe = result.get('short_name') or result.get('recipe', '')
         round_name = result.get('round', '')
         round_path = result.get('round_path', '')
+        # 화면 필터·PASS/FAIL과 같은 편차 기준을 쓴다 (Recipe별로 0점을 따로 잡는다)
+        axis_means = axis_reference_means(result.get('raw_data', []))
 
         for r in result.get('raw_data', []):
-            kinds = classify_row(r, spec_limits, recipe)
+            kinds = classify_row(r, spec_limits, recipe, axis_means=axis_means)
             if not kinds:
                 continue
 
             lot = r.get('lot_name', '')
             lot_dir = os.path.join(round_path, lot) if round_path and lot else ''
             filename = r.get('filename', '')
-            lsl, usl = spec_bounds(spec_limits, recipe, r.get('method', ''))
+            axis = (r.get('method') or '').upper()
+            lsl, usl = spec_bounds(spec_limits, recipe, axis)
+            ref = axis_means.get(axis)
+            value = r.get('value', '')
+            deviation = (round(value - ref, 3)
+                         if ref is not None and isinstance(value, (int, float))
+                         and value == value else '')
 
             rows.append({
+                'deviation': deviation,
+                'ref_mean': round(ref, 3) if ref is not None else '',
                 'recipe': recipe,
                 'round': round_name,
                 'lot': lot,
@@ -390,10 +401,10 @@ def write_quality_sheets(wb, recipe_results: list = None,
             ws, ANOMALY_HEADERS,
             [[a['recipe'], a['round'], a['lot'], a['site_id'], a['die_x'],
               a['die_y'], a['axis'], a['point_no'], a['state'], a['valid'],
-              a['value'], a['kinds'], a['lsl'], a['usl'],
-              a['csv_path'], a['lot_dir']]
+              a['value'], a['deviation'], a['ref_mean'], a['kinds'],
+              a['lsl'], a['usl'], a['csv_path'], a['lot_dir']]
              for a in anomalies],
-            st, width=18, highlight=lambda v: ANOMALY_FAILED in str(v[11]))
+            st, width=18, highlight=lambda v: ANOMALY_FAILED in str(v[13]))
 
         # 집계
         for title, key in (('By Lot', 'lot'), ('By Die', 'site_id')):

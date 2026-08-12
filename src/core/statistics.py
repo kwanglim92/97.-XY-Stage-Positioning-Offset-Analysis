@@ -209,11 +209,34 @@ def spec_bounds(spec_limits: dict, recipe_name: str, axis: str) -> tuple:
     return ax.get('lsl'), ax.get('usl')
 
 
+def axis_reference_means(data: list, metric_key: str = 'value') -> dict:
+    """축별 기준 평균 = 편차의 0점. {'X': mean, 'Y': mean}
+
+    compute_deviation_matrix(die_analysis.py)가 쓰는 정의와 동일하게
+    '해당 축의 유효·유한 측정값 전체 평균'을 쓴다. PASS/FAIL(Dev Range/StdDev)과
+    Spec 초과·Cpk가 같은 0점을 보게 하기 위한 단일 출처다.
+    """
+    buckets = {}
+    for r in data or []:
+        val = r.get(metric_key)
+        if (isinstance(val, (int, float)) and math.isfinite(val)
+                and r.get('valid', True)):
+            buckets.setdefault((r.get('method') or '').upper(), []).append(val)
+    return {ax: sum(v) / len(v) for ax, v in buckets.items() if v}
+
+
 def classify_row(row: dict, spec_limits: dict = None,
-                 recipe_name: str = '', metric_key: str = 'value') -> list:
+                 recipe_name: str = '', metric_key: str = 'value',
+                 axis_means: dict = None) -> list:
     """측정 행 하나의 이상 유형 목록을 돌려준다 (해당 없으면 빈 리스트).
 
     측정에 실패한 행은 값 자체가 없으므로 이상치·Spec 판정을 하지 않는다.
+
+    axis_means를 주면 Spec 판정을 **편차 기준**(값 − 축 기준평균)으로 한다.
+    raw 절대 offset에는 레시피별 기준점 차이(bias)가 섞여 있어, 같은 Die를
+    같은 Stage가 이동해도 Recipe마다 offset이 수 µm씩 다르게 나온다.
+    그 bias를 그대로 판정하면 Stage 성능이 아니라 기준점 정의를 재게 되므로,
+    PASS/FAIL(Dev Range/StdDev)과 같은 편차 기준으로 맞춘다.
     """
     val = row.get(metric_key, 0)
     finite = isinstance(val, (int, float)) and math.isfinite(val)
@@ -225,8 +248,11 @@ def classify_row(row: dict, spec_limits: dict = None,
     if row.get('is_outlier'):
         kinds.append(ANOMALY_OUTLIER)
 
-    lsl, usl = spec_bounds(spec_limits, recipe_name, row.get('method', ''))
-    if (lsl is not None and val < lsl) or (usl is not None and val > usl):
+    axis = (row.get('method') or '').upper()
+    target = val - (axis_means or {}).get(axis, 0.0)
+
+    lsl, usl = spec_bounds(spec_limits, recipe_name, axis)
+    if (lsl is not None and target < lsl) or (usl is not None and target > usl):
         kinds.append(ANOMALY_SPEC)
     return kinds
 

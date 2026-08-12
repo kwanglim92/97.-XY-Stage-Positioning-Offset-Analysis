@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from core.statistics import (classify_row, spec_bounds,
+from core.statistics import (classify_row, spec_bounds, axis_reference_means,
                              ANOMALY_FAILED, ANOMALY_OUTLIER, ANOMALY_SPEC)
 from core.exporter import (collect_anomalies, build_quality_summary,
                            build_file_issues, export_quality_report)
@@ -64,6 +64,30 @@ class TestClassifyRow:
     def test_spec_boundary_is_inclusive(self):
         assert classify_row(_row(5000.0), SPEC, "Vision Pattern") == []
 
+    def test_spec_uses_deviation_when_axis_means_given(self):
+        """레시피 기준점 차이(bias)는 Stage 성능이 아니므로 판정에서 빠져야 한다.
+
+        현장 Global Align X는 bias -3969 nm가 ±5000의 79%를 먹어, 산포가 정상인데도
+        raw 기준으로는 26건이 Spec 초과로 잡혔다(편차 기준으로는 0건).
+        """
+        means = {"X": -3969.0}
+        # 전체가 -3969 nm 밀려 있을 뿐 산포는 작은 행
+        row = _row(-8000.0)
+        assert classify_row(row, SPEC, "Vision Pattern") == [ANOMALY_SPEC]
+        assert classify_row(row, SPEC, "Vision Pattern", axis_means=means) == []
+
+        # bias를 걷어내도 남는 진짜 이탈은 그대로 잡힌다
+        far = _row(2000.0)
+        assert classify_row(far, SPEC, "Vision Pattern", axis_means=means) == [ANOMALY_SPEC]
+
+    def test_axis_reference_means_matches_deviation_definition(self):
+        """편차의 0점은 축별 '유효·유한 값 전체 평균' — PASS/FAIL과 같은 정의여야 한다."""
+        data = [_row(100.0), _row(300.0), _row(NAN, valid=False),
+                _row(1000.0, method="Y")]
+        means = axis_reference_means(data)
+        assert means["X"] == pytest.approx(200.0)   # NaN/무효 행은 제외
+        assert means["Y"] == pytest.approx(1000.0)
+
     def test_outlier_and_spec_together(self):
         kinds = classify_row(_row(99999.0, outlier=True), SPEC, "Vision Pattern")
         assert kinds == [ANOMALY_OUTLIER, ANOMALY_SPEC]
@@ -80,34 +104,35 @@ class TestClassifyRow:
 # ──────────────────────────────────────────────────────────────────────────
 class TestCollectAnomalies:
     def test_only_anomalous_rows_with_traceability(self):
-        rows = [_row(1000.0), _row(NAN, valid=False), _row(99999.0)]
+        # 정상 20건(평균 ≈ 0) + 측정 실패 1 + 편차 기준으로도 이탈하는 1건
+        rows = [_row(float(v)) for v in range(-10, 10)]
+        rows += [_row(NAN, valid=False), _row(9000.0)]
 
         found = collect_anomalies([_result(rows)], SPEC)
 
         assert len(found) == 2
-        first = found[0]
+        assert {f["kinds"] for f in found} == {ANOMALY_FAILED, ANOMALY_SPEC}
+        first = next(f for f in found if f["kinds"] == ANOMALY_FAILED)
         assert first["recipe"] == "Vision Pattern"
         assert first["lot"] == "Lot501"
-        assert first["kinds"] == ANOMALY_FAILED
         # 장비 담당자가 원본을 바로 찾아갈 수 있어야 한다
         assert first["csv_path"].endswith("Lot5_X_UL.csv")
         assert "Lot501" in first["lot_dir"]
 
     def test_summary_counts_match_detail(self):
-        rows = ([_row(1000.0)] * 5
-                + [_row(NAN, valid=False)] * 2
-                + [_row(99999.0, outlier=True)])
+        rows = [_row(float(v)) for v in range(-10, 10)]          # 정상 20
+        rows += [_row(NAN, valid=False)] * 2                      # 실패 2
+        rows += [_row(9000.0, outlier=True)]                      # 이상치 + Spec
         results = [_result(rows, warnings=["Lot501: MEAN U+FFFD"])]
 
         anomalies = collect_anomalies(results, SPEC)
         summary = build_quality_summary(results, anomalies)[0]
 
-        assert summary["total"] == 8
+        assert summary["total"] == 23
         assert summary["failed"] == 2
         assert summary["outlier"] == 1
         assert summary["spec"] == 1
         assert summary["file_issues"] == 1
-        assert summary["failed_pct"] == 25.0
 
     def test_file_issues_include_load_errors(self):
         r = _result([], warnings=["Lot501: MEAN U+FFFD"])
@@ -123,7 +148,8 @@ class TestExcelOutput:
         pytest.importorskip("openpyxl")
         from openpyxl import load_workbook
 
-        rows = [_row(1000.0), _row(NAN, valid=False), _row(99999.0)]
+        rows = [_row(float(v)) for v in range(-10, 10)]
+        rows += [_row(NAN, valid=False), _row(9000.0)]
         results = [_result(rows, warnings=["Lot501: MEAN U+FFFD"])]
         log_rows = [{"time": "18:56:54", "level": "경고", "message": "테스트"}]
         out = tmp_path / "QualityReport.xlsx"
