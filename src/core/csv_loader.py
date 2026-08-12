@@ -453,6 +453,29 @@ def scan_lot_folders(root_path: str) -> list:
 # Single Lot Loading
 # ──────────────────────────────────────────────
 
+def keep_height_rows(rows: list) -> tuple:
+    """같은 측정에 여러 채널 행이 있으면 마지막(Height) 행만 남긴다.
+
+    Vision Pattern Recognize 레시피는 한 번의 측정을 Z Drive와 Height 두 채널로
+    연달아 기록한다. Debug/Analysis의 LineData도 사이트마다 'Z Drive → Height'
+    순서이며, 위치 오프셋 분석에 써야 하는 값은 Height다.
+
+    다른 레시피는 측정당 1행이라 이 함수의 영향을 받지 않는다.
+    (같은 사이트의 반복 측정은 별도 Lot 폴더로 분리되므로 여기서 합쳐지지 않는다)
+
+    Returns:
+        (남은 행 리스트, 제외된 행 수)
+    """
+    kept = {}
+    order = []
+    for r in rows:
+        key = (r.get('Site ID', ''), r.get('Point No', ''), r.get('Method ID', ''))
+        if key not in kept:
+            order.append(key)
+        kept[key] = r          # 마지막 행이 이긴다 = Height
+    return [kept[k] for k in order], len(rows) - len(kept)
+
+
 def load_lot_data(lot_path: str) -> dict:
     """단일 Lot 폴더의 전체 CSV 데이터 로드
 
@@ -475,6 +498,7 @@ def load_lot_data(lot_path: str) -> dict:
         'header': [],
         'tiff_files': [],
         'warnings': [],
+        'channel_dropped': 0,   # Z Drive 채널로 제외된 행 수
     }
 
     files = os.listdir(lot_path)
@@ -483,7 +507,8 @@ def load_lot_data(lot_path: str) -> dict:
     x_csvs = [f for f in files if f.upper().endswith('_X_UL.CSV')]
     if x_csvs:
         parsed = parse_csv(os.path.join(lot_path, x_csvs[0]))
-        result['x_data'] = parsed['data']
+        result['x_data'], dropped = keep_height_rows(parsed['data'])
+        result['channel_dropped'] += dropped
         result['meta'] = parsed['meta']
         result['header'] = parsed['header']
 
@@ -491,7 +516,8 @@ def load_lot_data(lot_path: str) -> dict:
     y_csvs = [f for f in files if f.upper().endswith('_Y_UL.CSV')]
     if y_csvs:
         parsed = parse_csv(os.path.join(lot_path, y_csvs[0]))
-        result['y_data'] = parsed['data']
+        result['y_data'], dropped = keep_height_rows(parsed['data'])
+        result['channel_dropped'] += dropped
 
     # Summary CSV (통합, 대소문자 무시)
     summary_csvs = [f for f in files if f.lower().endswith('.csv')
@@ -530,7 +556,8 @@ def batch_load(root_path: str,
                axis: str = 'both',
                metric_col: str = 'HZ1_O (nm)',
                errors: Optional[list] = None,
-               warnings: Optional[list] = None) -> list:
+               warnings: Optional[list] = None,
+               info: Optional[dict] = None) -> list:
     """유연한 범위 지정 배치 로드 — Analysis csv combine.exe 완전 대체
 
     Args:
@@ -541,6 +568,7 @@ def batch_load(root_path: str,
         errors: 전달하면 Lot 단위 실패 메시지가 여기에 누적된다.
                 실패한 Lot은 건너뛰고 나머지 Lot은 정상 로드된다.
         warnings: 전달하면 로드는 됐지만 값이 비정상인 셀 경고가 여기에 누적된다.
+        info: 전달하면 부가 집계가 담긴다 ('channel_dropped' = Z Drive로 제외된 행 수).
 
     Returns:
         [{'lot_name': 'Lot401', 'lot_index': 1, 'filename': 'Lot4_X_UL.csv',
@@ -576,6 +604,9 @@ def batch_load(root_path: str,
 
         if warnings is not None:
             warnings.extend(lot_data.get('warnings', []))
+        if info is not None:
+            info['channel_dropped'] = (info.get('channel_dropped', 0)
+                                       + lot_data.get('channel_dropped', 0))
 
         # X 데이터
         if axis in ('both', 'x') and lot_data['x_data']:

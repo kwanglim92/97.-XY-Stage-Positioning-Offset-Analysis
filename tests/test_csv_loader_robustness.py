@@ -253,3 +253,66 @@ class TestEncodingHandling:
 
         assert parsed["data"] == []
         assert csv_loader._is_smartscan_csv(str(p)) is False
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Vision Pattern 채널 처리 — Z Drive 행이 분석에 섞이면 안 된다
+# ──────────────────────────────────────────────────────────────────────────
+class TestKeepHeightRows:
+    """Vision Pattern Recognize는 한 측정을 Z Drive/Height 두 채널로 기록한다.
+
+    Debug/Analysis의 LineData가 사이트마다 'Z Drive → Height' 순서이고,
+    위치 오프셋 분석에 써야 하는 값은 Height(= 마지막 행)다.
+    현장 데이터에서 이 행들이 섞여 Vision Pattern의 σ가 4680 → 1482 nm로,
+    이상치가 134 → 17건으로 잘못 부풀려져 있었다.
+    """
+
+    @staticmethod
+    def _row(site, value, point='1', method='X'):
+        return {'Site ID': site, 'Point No': point, 'Method ID': method,
+                'HZ1_O (nm)': value}
+
+    def test_keeps_last_row_per_measurement(self):
+        rows = [self._row('0001_X000_Y000', 'zdrive'),
+                self._row('0001_X000_Y000', 'height'),
+                self._row('0002_X000_Y000', 'zdrive2'),
+                self._row('0002_X000_Y000', 'height2')]
+
+        kept, dropped = csv_loader.keep_height_rows(rows)
+
+        assert dropped == 2
+        assert [r['HZ1_O (nm)'] for r in kept] == ['height', 'height2']
+
+    def test_single_channel_recipes_are_untouched(self):
+        """다른 3개 Recipe는 측정당 1행이라 영향을 받으면 안 된다."""
+        rows = [self._row(f'{i:04d}_X000_Y000', str(i)) for i in range(1, 6)]
+        kept, dropped = csv_loader.keep_height_rows(rows)
+        assert dropped == 0
+        assert kept == rows
+
+    def test_site_order_is_preserved(self):
+        rows = [self._row('0003_X002_Y000', 'c'), self._row('0001_X000_Y000', 'a'),
+                self._row('0001_X000_Y000', 'a2')]
+        kept, _ = csv_loader.keep_height_rows(rows)
+        assert [r['Site ID'] for r in kept] == ['0003_X002_Y000', '0001_X000_Y000']
+
+    def test_different_point_or_axis_are_separate_measurements(self):
+        """Point No/Method가 다르면 서로 다른 측정이므로 합쳐지면 안 된다."""
+        rows = [self._row('0001_X000_Y000', 'x', point='1', method='X'),
+                self._row('0001_X000_Y000', 'y', point='2', method='Y')]
+        kept, dropped = csv_loader.keep_height_rows(rows)
+        assert dropped == 0
+        assert len(kept) == 2
+
+    def test_load_lot_data_reports_dropped_count(self, tmp_path):
+        """제외한 행 수를 보고해야 한다 (조용히 버리면 안 된다)."""
+        lot = tmp_path / 'Lot61'
+        lot.mkdir()
+        dup = X_UL_CSV + "0001_X000_Y000,0,0,1,4305.72,5726,X,COMPLETED,TRUE,999.0,TRUE\r\n"
+        _write_csv(lot / 'Lot6_X_UL.csv', dup)
+
+        result = csv_loader.load_lot_data(str(lot))
+
+        assert result['channel_dropped'] == 1
+        # 마지막(Height) 값이 남는다
+        assert result['x_data'][0]['HZ1_O (nm)'] == '999.0'

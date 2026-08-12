@@ -161,8 +161,10 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
 
     load_errors = []
     data_warnings = []
+    load_info = {}
     data = batch_load(round_info['path'], lot_range=lot_range, axis=axis,
-                      errors=load_errors, warnings=data_warnings)
+                      errors=load_errors, warnings=data_warnings,
+                      info=load_info)
     if not data:
         return {'recipe': recipe['name'], 'round': round_info['name'],
                 'raw_data': [], 'error': 'No data loaded',
@@ -179,6 +181,7 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
         'raw_data': data,
         'load_errors': load_errors,
         'data_warnings': data_warnings,
+        'channel_dropped': load_info.get('channel_dropped', 0),
         'failed_measurements': summarize_failed_measurements(data),
         'statistics': compute_statistics(data),
         'trend': compute_trend(data),

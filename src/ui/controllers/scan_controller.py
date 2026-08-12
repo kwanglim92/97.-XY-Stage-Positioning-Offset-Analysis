@@ -138,6 +138,13 @@ class ScanMixin:
                 self.logger.error(f"  ❌ {label}: {msg}")
                 clean = False
 
+            # Z Drive 채널 제외는 정상 동작이지만 행 수가 줄므로 근거를 남긴다
+            dropped = r.get('channel_dropped', 0)
+            if dropped:
+                self.logger.info(
+                    f"  ℹ {label}: Z Drive 채널 {dropped}행 제외 "
+                    f"(위치 오프셋은 Height 채널로 분석)")
+
             # 측정 실패 행 요약 — '어느 Lot/Die가 실제로 문제인지' 구별용
             failed = r.get('failed_measurements') or {}
             if failed.get('count'):
