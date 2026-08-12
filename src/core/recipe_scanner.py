@@ -14,6 +14,8 @@ recipe_scanner.py — Multi-Recipe 자동 탐지 및 비교
 
 import os
 import re
+import logging
+import traceback
 from core.csv_loader import scan_lot_folders, batch_load, get_scan_summary
 from core import (compute_statistics, compute_trend,
                       detect_outliers, compute_repeatability,
@@ -101,7 +103,8 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
     Returns:
         {'recipe': ..., 'round': ..., 'raw_data': [...],
          'statistics': {...}, 'trend': [...], 'repeatability': {...},
-         'group_stats': [...], 'outlier_count': N}
+         'group_stats': [...], 'outlier_count': N,
+         'load_errors': [건너뛴 Lot 메시지, ...]}
     """
     # 해당 라운드 찾기
     round_info = None
@@ -116,12 +119,15 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
 
     if not round_info:
         return {'recipe': recipe['name'], 'round': round_name,
-                'raw_data': [], 'error': 'No data found'}
+                'raw_data': [], 'error': 'No data found', 'load_errors': []}
 
-    data = batch_load(round_info['path'], lot_range=lot_range, axis=axis)
+    load_errors = []
+    data = batch_load(round_info['path'], lot_range=lot_range, axis=axis,
+                      errors=load_errors)
     if not data:
         return {'recipe': recipe['name'], 'round': round_info['name'],
-                'raw_data': [], 'error': 'No data loaded'}
+                'raw_data': [], 'error': 'No data loaded',
+                'load_errors': load_errors}
 
     data = detect_outliers(data, method='iqr')
 
@@ -131,6 +137,7 @@ def load_recipe_data(recipe: dict, round_name: str = '1st',
         'round': round_info['name'],
         'round_path': round_info['path'],
         'raw_data': data,
+        'load_errors': load_errors,
         'statistics': compute_statistics(data),
         'trend': compute_trend(data),
         'trend_x': compute_trend([r for r in data if r.get('method') == 'X']),
@@ -158,7 +165,20 @@ def load_all_recipes(root_path: str, round_name: str = '1st',
     for i, recipe in enumerate(recipes):
         if progress_cb:
             progress_cb(i + 1, len(recipes), recipe['name'])
-        result = load_recipe_data(recipe, round_name=round_name, axis=axis)
+        # Recipe 단위 격리 — 한 Recipe의 실패가 나머지 Recipe 분석까지 무효화하지 않게 한다.
+        try:
+            result = load_recipe_data(recipe, round_name=round_name, axis=axis)
+        except Exception as e:
+            logging.warning("Recipe '%s' 로드 실패:\n%s",
+                            recipe['name'], traceback.format_exc())
+            result = {
+                'recipe': recipe['name'],
+                'short_name': recipe.get('short_name', recipe['name']),
+                'round': round_name,
+                'raw_data': [],
+                'error': f'{type(e).__name__}: {e}',
+                'load_errors': [],
+            }
         results.append(result)
 
     return results

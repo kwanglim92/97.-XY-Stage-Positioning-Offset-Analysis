@@ -9,6 +9,7 @@ csv_loader.py — SmartScan Recipe 결과 CSV 범용 파서
 import os
 import re
 import csv
+import logging
 from typing import Optional, Union
 
 
@@ -26,7 +27,7 @@ def _read_file_bytes(file_path: str) -> bytes:
     기업 DLP 정책으로 Python open()이 PermissionError를 일으킬 때
     xcopy로 임시 파일 복사 후 읽기.
     """
-    import subprocess, tempfile, logging
+    import subprocess, tempfile
 
     # 1차: 직접 읽기
     try:
@@ -59,19 +60,52 @@ def _read_file_bytes(file_path: str) -> bytes:
     return b''
 
 
-def _open_csv_rows(csv_path: str) -> list:
-    """인코딩 자동 감지 CSV 읽기 (네트워크 드라이브 호환)."""
-    raw = _read_file_bytes(csv_path)
-    if not raw:
-        return []
+def _decode_bytes(raw: bytes, file_path: str) -> tuple:
+    """_ENCODINGS 순서로 디코드 시도 → (text, 사용된 인코딩). 전부 실패 시 (None, None).
+
+    마지막 폴백 'latin-1'은 256바이트를 모두 매핑하므로 **어떤 입력에도 예외를 던지지
+    않는다**. 즉 인코딩이 틀린 파일도 조용히 깨진 문자열로 통과한다. 그 깨진 값이
+    수치 파싱까지 흘러가 원인 불명의 오류로 나타나는 것을 막기 위해, 최종 폴백이
+    실제로 쓰이면 파일 경로와 함께 경고를 남긴다.
+    """
+    last = _ENCODINGS[-1]
     for enc in _ENCODINGS:
         try:
             text = raw.decode(enc)
-            import io
-            return list(csv.reader(io.StringIO(text)))
         except (UnicodeDecodeError, ValueError):
             continue
-    return []
+        if enc == last:
+            logging.warning("인코딩 폴백 '%s' 사용 — 문자가 깨졌을 수 있습니다: %s",
+                            enc, file_path)
+        return text, enc
+
+    logging.warning("지원 인코딩(%s)으로 디코드 실패: %s",
+                    ', '.join(_ENCODINGS), file_path)
+    return None, None
+
+
+def _open_csv_rows(csv_path: str) -> list:
+    """인코딩 자동 감지 CSV 읽기 (네트워크 드라이브 호환).
+
+    파싱 실패는 예외를 올리지 않고 '빈 결과 + 경고 로그'로 처리한다.
+    한 파일의 문제가 스캔 전체를 중단시키지 않게 하기 위함.
+    """
+    raw = _read_file_bytes(csv_path)
+    if not raw:
+        return []
+
+    text, _ = _decode_bytes(raw, csv_path)
+    if text is None:
+        return []
+
+    import io
+    try:
+        return list(csv.reader(io.StringIO(text)))
+    except csv.Error as e:
+        # 예: UTF-16 파일이 latin-1로 디코드되면 'line contains NUL character'.
+        # csv.Error는 ValueError가 아니라 그냥 새어 나가던 경로였다.
+        logging.warning("CSV 파싱 실패 (%s): %s", e, csv_path)
+        return []
 
 
 def _open_csv_text(csv_path: str, max_lines: int = 20) -> list:
@@ -79,13 +113,24 @@ def _open_csv_text(csv_path: str, max_lines: int = 20) -> list:
     raw = _read_file_bytes(csv_path)
     if not raw:
         return []
-    for enc in _ENCODINGS:
-        try:
-            text = raw.decode(enc)
-            return text.splitlines(True)[:max_lines]
-        except (UnicodeDecodeError, ValueError):
-            continue
-    return []
+
+    text, _ = _decode_bytes(raw, csv_path)
+    if text is None:
+        return []
+    return text.splitlines(True)[:max_lines]
+
+
+def _describe_bad_value(val: str) -> str:
+    """수치 변환에 실패한 문자열을 코드포인트까지 포함해 설명한다.
+
+    폰트에 글리프가 없어 화면에 '□'로만 보이는 문자(U+FEFF, C1 제어문자, U+FFFD 등)도
+    로그에서는 'U+FEFF'처럼 식별 가능한 형태로 남는다.
+    """
+    head = val[:8]
+    points = ' '.join(f'U+{ord(c):04X}' for c in head)
+    if len(val) > 8:
+        points += ' ...'
+    return f'{val!r} ({points})'
 
 
 def parse_csv(csv_path: str) -> dict:
@@ -157,7 +202,8 @@ def parse_summary_csv(csv_path: str) -> dict:
             'x_summary': {'mean': ..., 'stdev': ..., 'min': ..., 'max': ..., 'range': ...},
             'y_summary': {...},
             'x_data': [...],
-            'y_data': [...]
+            'y_data': [...],
+            'warnings': ['Sample10.csv MEAN: ... → 0.0 대체', ...]
         }
     """
     meta = {}
@@ -165,11 +211,12 @@ def parse_summary_csv(csv_path: str) -> dict:
     y_summary = {}
     x_data = []
     y_data = []
+    warnings = []
 
     rows = _open_csv_rows(csv_path)
     if not rows:
         return {'meta': {}, 'x_summary': {}, 'y_summary': {},
-                'x_data': [], 'y_data': []}
+                'x_data': [], 'y_data': [], 'warnings': []}
 
     current_section = None
     current_data_header = None
@@ -209,7 +256,20 @@ def parse_summary_csv(csv_path: str) -> dict:
         if first == 'ITEM':
             continue  # 헤더 행 건너뛰기
         if first in ('MEAN', 'STDEV', 'MIN', 'MAX', 'RANGE'):
-            val = float(row[1].strip()) if len(row) > 1 and row[1].strip() else 0.0
+            # 여기서 무방비 float()를 쓰면 셀 하나가 스캔 전체를 중단시킨다.
+            # 계측 SW이므로 '실제 0'과 '파싱 실패로 0 대체'는 반드시 구분해 기록한다.
+            raw_val = row[1].strip() if len(row) > 1 else ''
+            if not raw_val:
+                val = 0.0
+            else:
+                try:
+                    val = float(raw_val)
+                except (ValueError, TypeError):
+                    val = 0.0
+                    msg = (f'{os.path.basename(csv_path)} {first}: '
+                           f'{_describe_bad_value(raw_val)} → 0.0 대체')
+                    warnings.append(msg)
+                    logging.warning('%s [%s]', msg, csv_path)
             target = x_summary if current_section == 'x' else y_summary
             target[first.lower()] = val
             continue
@@ -235,6 +295,7 @@ def parse_summary_csv(csv_path: str) -> dict:
         'y_summary': y_summary,
         'x_data': x_data,
         'y_data': y_data,
+        'warnings': warnings,
     }
 
 
@@ -279,7 +340,12 @@ def _is_data_folder(folder_path: str) -> dict:
     if not os.path.isdir(folder_path):
         return None
 
-    files = os.listdir(folder_path)
+    try:
+        files = os.listdir(folder_path)
+    except OSError as e:
+        # 네트워크 드라이브 / DLP 권한 문제 — 폴더 하나 때문에 스캔 전체가 죽지 않게 한다.
+        logging.warning("폴더 목록 조회 실패 (%s): %s", e, folder_path)
+        return None
 
     x_csvs = [f for f in files if f.upper().endswith('_X_UL.CSV')]
     y_csvs = [f for f in files if f.upper().endswith('_Y_UL.CSV')]
@@ -344,7 +410,13 @@ def scan_lot_folders(root_path: str) -> list:
 
     folders = []
 
-    for name in sorted(os.listdir(root_path)):
+    try:
+        names = sorted(os.listdir(root_path))
+    except OSError as e:
+        logging.warning("폴더 목록 조회 실패 (%s): %s", e, root_path)
+        return []
+
+    for name in names:
         full_path = os.path.join(root_path, name)
         if not os.path.isdir(full_path):
             continue
@@ -425,9 +497,16 @@ def load_lot_data(lot_path: str) -> dict:
                     and not f.upper().endswith('_X_UL.CSV')
                     and not f.upper().endswith('_Y_UL.CSV')]
     if summary_csvs:
-        summary = parse_summary_csv(os.path.join(lot_path, summary_csvs[0]))
-        result['x_summary'] = summary['x_summary']
-        result['y_summary'] = summary['y_summary']
+        # 요약 CSV는 현재 앱 어디에서도 소비되지 않는 부가 정보다.
+        # 여기서 실패해도 같은 Lot의 실측 데이터(x_data/y_data) 로드를 막아서는 안 된다.
+        summary_path = os.path.join(lot_path, summary_csvs[0])
+        try:
+            summary = parse_summary_csv(summary_path)
+            result['x_summary'] = summary['x_summary']
+            result['y_summary'] = summary['y_summary']
+        except Exception as e:
+            logging.warning("요약 CSV 파싱 실패 (%s: %s): %s",
+                            type(e).__name__, e, summary_path)
 
     # TIFF 파일 목록
     result['tiff_files'] = sorted(
@@ -444,7 +523,8 @@ def load_lot_data(lot_path: str) -> dict:
 def batch_load(root_path: str,
                lot_range: Optional[Union[tuple, list]] = None,
                axis: str = 'both',
-               metric_col: str = 'HZ1_O (nm)') -> list:
+               metric_col: str = 'HZ1_O (nm)',
+               errors: Optional[list] = None) -> list:
     """유연한 범위 지정 배치 로드 — Analysis csv combine.exe 완전 대체
 
     Args:
@@ -452,6 +532,8 @@ def batch_load(root_path: str,
         lot_range: None=전체, (start, end)=번호범위, [1,3,5]=특정 인덱스
         axis: 'both', 'x', 'y' — 분석 축 선택
         metric_col: 측정값 컬럼 이름
+        errors: 전달하면 Lot 단위 실패 메시지가 여기에 누적된다.
+                실패한 Lot은 건너뛰고 나머지 Lot은 정상 로드된다.
 
     Returns:
         [{'lot_name': 'Lot401', 'lot_index': 1, 'filename': 'Lot4_X_UL.csv',
@@ -474,7 +556,16 @@ def batch_load(root_path: str,
 
     results = []
     for lot in lots:
-        lot_data = load_lot_data(lot['path'])
+        # Lot 단위 격리 — 한 폴더의 문제가 나머지 Lot 전체를 무효화하지 않게 한다.
+        try:
+            lot_data = load_lot_data(lot['path'])
+        except Exception as e:
+            msg = (f"Lot '{lot['lot_name']}' 로드 실패 "
+                   f"({type(e).__name__}: {e}) — 건너뜁니다")
+            logging.warning('%s [%s]', msg, lot['path'])
+            if errors is not None:
+                errors.append(msg)
+            continue
 
         # X 데이터
         if axis in ('both', 'x') and lot_data['x_data']:

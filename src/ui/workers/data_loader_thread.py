@@ -8,7 +8,7 @@ from core.recipe_scanner import load_all_recipes, compare_recipes
 
 class DataLoaderThread(QThread):
     finished = Signal(object, object, float)
-    error = Signal(str)
+    error = Signal(str, str)  # (다이얼로그용 요약, System Log용 traceback 전문)
 
     def __init__(self, folder, parent=None):
         super().__init__(parent)
@@ -16,6 +16,7 @@ class DataLoaderThread(QThread):
 
     def run(self):
         import time
+        import traceback
         t0 = time.perf_counter()
         try:
             results = load_all_recipes(self.folder, round_name='1st', axis='both')
@@ -23,4 +24,6 @@ class DataLoaderThread(QThread):
             elapsed = time.perf_counter() - t0
             self.finished.emit(results, comparison, elapsed)
         except Exception as e:
-            self.error.emit(str(e))
+            # str(e)만 보내면 예외 타입도 파일 경로도 남지 않아 현장 추적이 불가능하다.
+            # 요약은 다이얼로그에, traceback 전문은 System Log에 남긴다.
+            self.error.emit(f"{type(e).__name__}: {e}", traceback.format_exc())

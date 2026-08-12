@@ -101,9 +101,15 @@ class ScanMixin:
             if btn is not None:
                 btn.setEnabled(enabled)
 
-    def _on_scan_error(self, e):
-        """로드 스레드 error 슬롯 — 메시지 표시 + 상태 복구(스레드 리셋, 버튼 재활성)."""
+    def _on_scan_error(self, e, tb=''):
+        """로드 스레드 error 슬롯 — 메시지 표시 + 상태 복구(스레드 리셋, 버튼 재활성).
+
+        다이얼로그에는 요약만, System Log에는 traceback 전문을 남긴다.
+        (현장에서 어느 파일·어느 함수인지 추적할 수 있어야 한다)
+        """
         self.logger.error(f"로드 오류: {e}")
+        if tb:
+            self.logger.error(tb.rstrip())
         self._loader_thread = None
         self._set_scan_controls_enabled(True)
         self.statusBar().showMessage("스캔 실패")
@@ -114,6 +120,16 @@ class ScanMixin:
         self.recipe_results = results
         total = sum(len(r.get('raw_data', [])) for r in results)
         self.logger.ok(f"✅ 전체 로드 완료: {total}개 데이터 ({elapsed:.1f}초 소요)")
+
+        # 격리 처리된 실패는 조용히 넘기지 않고 반드시 로그에 드러낸다.
+        # (일부 Lot/Recipe가 빠진 채 정상처럼 보이는 상황을 막기 위함)
+        for r in results:
+            label = r.get('short_name') or r.get('recipe', '')
+            if r.get('error'):
+                self.logger.error(f"  ❌ {label}: {r['error']}")
+            for msg in r.get('load_errors', []):
+                self.logger.warn(f"  ⚠ {label}: {msg}")
+
         self._update_summary_table(comparison, results)
 
         # 모든 Step Pass/Fail 일괄 계산 → 버튼 색상 즉시 반영
